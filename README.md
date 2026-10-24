@@ -32,7 +32,15 @@ Install straight from GitHub:
 paseo plugin add git:monarchmaisuriya/memorise
 ```
 
-Paseo clones the repository and runs the manifest's `build` command, `npm ci --omit=dev --ignore-scripts`, which installs only the runtime packages from the committed lock file. To pin a version, add `--ref <tag or commit>`.
+Paseo clones the repository and runs the manifest's `build` command, `npm ci --omit=dev --ignore-scripts`, which installs only the runtime packages from the committed lock file.
+
+To install a specific release instead of the latest commit, name its tag:
+
+```bash
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.1.0
+```
+
+Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 To work on the code instead, clone it and install the folder; Paseo then runs the plugin from your clone:
 
@@ -170,3 +178,26 @@ paseo plugin reload memorise
 | `shared/` | both: schemas, RPC contracts, settings |
 
 `OVERVIEW.md` is the description Paseo shows for the plugin.
+
+## Releasing
+
+Versions follow [Semantic Versioning](https://semver.org). `package.json` holds the version, and each release is an annotated Git tag `v<version>` on the release commit.
+
+1. Pick the next version: patch (`0.1.1`) for fixes, minor (`0.2.0`) for new features. Below 1.0.0, a change that renames or breaks something is also a minor release; from 1.0.0 on, it is a major release.
+2. In `CHANGELOG.md`, move the notes under `[Unreleased]` into a new heading for that version and date, and update the links at the bottom.
+3. Set the version, check, commit, and tag:
+
+   ```bash
+   npm version 0.2.0 --no-git-tag-version --ignore-scripts
+   npm test && npm run typecheck
+   git add package.json package-lock.json CHANGELOG.md
+   git commit -m "Release 0.2.0"
+   git tag -a v0.2.0 -m "memorise 0.2.0"
+   ```
+
+4. Publish the commit and tag, then create the GitHub release from that version's changelog notes:
+
+   ```bash
+   git push origin main v0.2.0
+   gh release create v0.2.0 --title "memorise 0.2.0" --notes-file <notes file>
+   ```
