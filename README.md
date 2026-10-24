@@ -1,3 +1,5 @@
+<img src="assets/icon.png" alt="Memorise logo" width="96">
+
 # memorise
 
 Memorise for [Paseo](https://paseo.sh): one shared memory for Claude, Codex, and OpenCode agents.

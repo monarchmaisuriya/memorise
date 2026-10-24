@@ -69,7 +69,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
     />
   );
   const saveAction = (
-    <SettingsAction label="Changes above" actionLabel="Save" disabled={settings.saving || Object.keys(drafts).length === 0} error={inputError ?? settings.saveError} onPress={saveDrafts} />
+    <SettingsAction label="" actionLabel="Save" disabled={settings.saving || Object.keys(drafts).length === 0} error={inputError ?? settings.saveError} onPress={saveDrafts} />
   );
   return (
     <>
