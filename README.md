@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.5.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -131,7 +131,7 @@ agent created in a workspace
         |
         v
 plugin finds the repo key from the origin remote   e.g. github.com/acme/api
-  (a folder outside git: from its path)            e.g. folder/notes-3f9a1c2b7d4e
+  (a folder outside git: its recorded key)          e.g. folder/notes-3f9a1c2b7d4e
         |
         v
 reads memories: repo + global  -->  ranks them  -->  adds the list to the system prompt
@@ -159,7 +159,13 @@ The Markdown files are the source of truth. Updating a memory writes a new file 
 
 A repository without an origin is grouped by its git folder, which its worktrees share. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias.
 
-A folder outside git is grouped by its own path, under a key such as `folder/notes-3f9a1c2b7d4e` that carries its name. It has everything a repository has (memories, agent tools, the manager and panel, capture, tidy, project scans, auto-approve, switches, import and export), except what needs git history: ranking by files the checkout changed, and citations pinned to a commit. Moving or renaming the folder gives it a new key; export and import carry its memories over.
+A folder outside git is a project of its own, under a key such as `folder/notes-3f9a1c2b7d4e` that it gets the first time Memorise sees it. It has everything a repository has: memories, agent tools, the manager and panel, capture, tidy, project scans, auto-approve, switches, and import and export.
+
+- **Renamed or moved:** the key is recorded in `folders.json` in the plugin's data, so a folder renamed or moved on the same disk keeps its key and memories; the manager shows its current name. A copy, or a move to another disk, is a new project (export and import carry memories over).
+- **Subfolders:** the folder of a Paseo project outside git is a project root, and an agent started in a folder below it gets that project's memories, unless that subfolder already has memories or proposals of its own. A folder where an agent merely ran claims nothing below it, and your home folder and the filesystem root are never project roots.
+- **Which folder is which:** a folder is recognised by its identity on disk first, so two folders that swap names keep their own memories. A new folder made at a path another folder used to have gets a key of its own; the old folder's memories stay listed in the manager.
+- **Ranking:** with no git history, the files changed in the last 7 days stand in for the files a checkout changed (hidden, build, and dependency folders are skipped; the walk stops at 20,000 entries, 2,000 files, or 300 ms).
+- **Citations:** pinned to the cited file's content instead of a commit; the memory is marked "needs check" when the file changes or goes.
 
 ## Capture, tidy, and project scans
 

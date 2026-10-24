@@ -2,7 +2,7 @@ Memorise gives Claude, Codex, and OpenCode agents one shared memory. A fact lear
 
 ## How it works
 
-Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/memorise/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share. A folder outside git is a project of its own, grouped by its path, with the same features except ranking by changed files and citations, which need git.
+Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/memorise/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share. A folder outside git is a project of its own with the same features: it keeps its key when renamed or moved on the same disk, agents in a Paseo project's subfolders share the project's memories, files changed this week rank its memories, and citations are pinned to the file's content.
 
 When a supported agent is created, the plugin adds two things to it:
 
