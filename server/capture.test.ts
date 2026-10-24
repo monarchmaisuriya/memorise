@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,6 +104,48 @@ describe("capture", () => {
   });
 
   const reply = JSON.stringify({ facts: [{ type: "gotcha", subject: "integration tests", body: "Integration tests need DOCKER_HOST set.", paths: ["scripts/**"] }] });
+
+  it("scans a project and proposes new memories marked as from the project", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev to start the API.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev server", body: "Run make dev to start the API.", paths: ["Makefile"] }] }));
+    capture.remember(fake.paseo);
+    expect(await capture.scanProject(REPO, cwd, "create")).toEqual({ pending: 1, autoSaved: 0 });
+    const [proposal] = await proposals.list(REPO);
+    expect(proposal).toMatchObject({ kind: "new", subject: "dev server", source: { from: "project", provider: "claude" } });
+    expect(fake.created[0].prompt).toContain("<<<File README.md");
+    expect(fake.created[0].config.provider).toBe("claude/claude-default");
+  });
+
+  it("re-checks saved memories against the project and proposes retiring a contradicted one", async () => {
+    await writeFile(join(cwd, "README.md"), "Tests run with vitest.\n");
+    const old = await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject: "tests", body: "Tests run with jest.", supersedes: null, source: { by: "user", provider: null, branch: null, commit: null }, citations: [] });
+    const fake = fakePaseo([], JSON.stringify({ facts: [], actions: [{ action: "retire", id: old.id, reason: "README says vitest" }] }));
+    capture.remember(fake.paseo);
+    expect(await capture.scanProject(REPO, cwd, "refresh")).toEqual({ pending: 1, autoSaved: 0 });
+    expect((await proposals.list(REPO))[0]).toMatchObject({ kind: "retire", targets: [old.id], reason: "README says vitest" });
+    expect(fake.created[0].prompt).toContain(`id: ${old.id}`);
+  });
+
+  it("with auto mode on, saves new memories marked auto and leaves changes for review", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    const old = await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject: "old", body: "Obsolete.", supersedes: null, source: { by: "user", provider: null, branch: null, commit: null }, citations: [] });
+    const reply = { facts: [{ type: "howto", subject: "dev", body: "Run make dev.", paths: [] }], actions: [{ action: "retire", id: old.id, reason: "gone" }] };
+    capture.remember(fakePaseo([], JSON.stringify(reply)).paseo);
+    expect(await capture.scanProject(REPO, cwd, "refresh")).toEqual({ pending: 1, autoSaved: 1 });
+    const saved = (await store.list(REPO)).find((fact) => fact.subject === "dev");
+    expect(saved?.source.by).toBe("auto");
+    expect((await proposals.list(REPO)).map((proposal) => proposal.kind)).toEqual(["retire"]);
+  });
+
+  it("with auto mode on, saves captured memories and says so on the chat card", async () => {
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(0);
+    expect((await store.list(REPO)).map((fact) => fact.source.by)).toEqual(["auto"]);
+    expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1 } });
+  });
 
   it("follows a repo's capture setting over the host setting", async () => {
     values = { ...values, captureEnabled: false };

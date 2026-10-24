@@ -4,8 +4,9 @@ import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import { type FactListItem, type MemorySettings, PROPOSALS_CARD_KIND } from "../shared/memory";
 import { checkCitations } from "./citations";
-import { buildCapturePrompt, buildTidyPrompt, CAPTURE_OUTPUT_SCHEMA, parseCandidates, parseTidyActions, TIDY_OUTPUT_SCHEMA } from "./extractor";
+import { buildCapturePrompt, buildProjectPrompt, buildTidyPrompt, CAPTURE_OUTPUT_SCHEMA, parseCandidates, parseProjectReply, parseTidyActions, projectOutputSchema, type ScanMode, TIDY_OUTPUT_SCHEMA } from "./extractor";
 import type { PaseoApi } from "./paseo-types";
+import { readProjectFiles } from "./project-files";
 import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
@@ -52,6 +53,7 @@ export class Capture {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly running = new Set<string>();
   private readonly tidying = new Set<string>();
+  private readonly scanning = new Set<string>();
   private readonly workerIds = new Set<string>();
   private swept = false;
   private readonly statePath: string;
@@ -186,6 +188,73 @@ export class Capture {
     );
   }
 
+  // Adds proposals, then, when the repo has auto-approve on, approves the new memories among them at
+  // once. Changes to saved memories (tidy, replace, retire) always wait for the user.
+  private async addProposals(repoKey: string, candidates: readonly NewProposal[], facts: readonly FactListItem[]): Promise<{ pending: number; autoSaved: number }> {
+    const added = await this.deps.proposals.add(candidates, facts);
+    if (!(await this.deps.repoPrefs.get(repoKey)).autoApprove) return { pending: added.length, autoSaved: 0 };
+    let autoSaved = 0;
+    for (const proposal of added) {
+      if (proposal.kind !== "new" || proposal.source.from === "tidy") continue;
+      try {
+        await this.deps.proposals.approve(proposal.id, repoKey, this.deps.store, {}, "auto");
+        autoSaved += 1;
+      } catch (error) {
+        console.error(`[memorise] could not auto-approve "${proposal.subject}": ${error instanceof Error ? error.message : String(error)}; it waits for review`);
+      }
+    }
+    return { pending: added.length - autoSaved, autoSaved };
+  }
+
+  isScanning(repoKey: string): boolean {
+    return this.scanning.has(repoKey);
+  }
+
+  // One project scan of a repo: reads its project files from `cwd`, and proposes new memories
+  // ("create"), or also replacements and retirements of saved ones the files contradict ("refresh").
+  // Uses the tidy provider and model, and counts against the daily limit.
+  async scanProject(repoKey: string, cwd: string, mode: ScanMode): Promise<{ pending: number; autoSaved: number }> {
+    if (this.scanning.has(repoKey)) throw new Error("A project scan of this repo is already running");
+    this.scanning.add(repoKey);
+    try {
+      const paseo = this.paseo;
+      if (!paseo) throw new Error("The plugin has not seen Paseo yet; open an agent and try again");
+      const values = await this.deps.settings();
+      const files = await readProjectFiles(cwd);
+      if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
+      if (!(await this.takeRun(`project scan of ${repoKey}`, values.captureMaxPerDay))) return { pending: 0, autoSaved: 0 };
+      const facts = await this.deps.store.list(repoKey);
+      const saved = facts.filter((fact) => fact.scope === "repo" && fact.status === "active" && !fact.superseded).slice(0, 200);
+      const provider: Provider = values.tidyProvider;
+      const reply = await runWorker(
+        paseo,
+        this.deps.root,
+        { provider, model: values.tidyModel, title: `memorise: project ${mode}`, prompt: buildProjectPrompt({ repoKey, mode, files, existing: saved }), outputSchema: projectOutputSchema(mode), timeoutMs: WORKER_TIMEOUT_MS },
+        (id) => this.trackWorker(id),
+      );
+      const byId = new Map(saved.map((fact) => [fact.id, fact]));
+      let parsed: ReturnType<typeof parseProjectReply>;
+      try {
+        parsed = parseProjectReply(extractJson(reply), mode, new Set(byId.keys()));
+      } catch (error) {
+        throw new Error(`the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing proposed`);
+      }
+      const source = { from: "project" as const, agentId: null, provider, model: values.tidyModel || null };
+      const proposals: NewProposal[] = [
+        ...parsed.facts.map((fact): NewProposal => ({ repoKey, kind: "new", targets: [], type: fact.type, subject: fact.subject, body: fact.body, paths: fact.paths, reason: "", source })),
+        ...parsed.actions.flatMap((action): NewProposal[] => {
+          const target = byId.get(action.id);
+          if (!target) return [];
+          if (action.action === "replace") return [{ repoKey, kind: "replace", targets: [action.id], type: target.type, subject: action.subject, body: action.body, paths: target.paths, reason: action.reason, source }];
+          return [{ repoKey, kind: "retire", targets: [action.id], type: target.type, subject: target.subject, body: target.body, paths: target.paths, reason: action.reason, source }];
+        }),
+      ];
+      return await this.addProposals(repoKey, proposals, facts);
+    } finally {
+      this.scanning.delete(repoKey);
+    }
+  }
+
   // A repo's own capture preference overrides the host setting.
   private async captureOn(values: MemorySettings, repoKey: string): Promise<boolean> {
     const { capture } = await this.deps.repoPrefs.get(repoKey);
@@ -243,7 +312,8 @@ export class Capture {
         console.error(`[memorise] capture for agent ${agent.id}: the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); these turns are skipped`);
         return 0;
       }
-      const added = await this.deps.proposals.add(
+      const added = await this.addProposals(
+        repoKey,
         candidates.map(
           (candidate): NewProposal => ({
             repoKey,
@@ -260,14 +330,14 @@ export class Capture {
         facts,
       );
       await this.saveCursor(agent.id, cursor);
-      if (added.length > 0) {
+      if (added.pending + added.autoSaved > 0) {
         // A card in the source agent's chat; the app renders it, the model never sees it.
         await paseo.agents
           .ref(agent.id)
-          .timeline.append({ type: "plugin", id: PROPOSALS_CARD_KIND, kind: PROPOSALS_CARD_KIND, version: 1, data: { count: added.length } })
+          .timeline.append({ type: "plugin", id: PROPOSALS_CARD_KIND, kind: PROPOSALS_CARD_KIND, version: 1, data: { count: added.pending, autoSaved: added.autoSaved } })
           .catch((error: unknown) => console.error(`[memorise] could not add the proposals card: ${String(error)}`));
       }
-      return added.length;
+      return added.pending;
     } finally {
       this.running.delete(agent.id);
     }

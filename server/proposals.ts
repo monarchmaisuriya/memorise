@@ -60,6 +60,19 @@ export class ProposalStore {
     return proposals.sort((a, b) => a.created.localeCompare(b.created));
   }
 
+  // Repos with proposals waiting and how many, in repo key order.
+  async summary(): Promise<{ repoKey: string; pending: number }[]> {
+    const repos: { repoKey: string; pending: number }[] = [];
+    const walk = async (dir: string, segments: string[]): Promise<void> => {
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+      const pending = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).length;
+      if (pending > 0 && repoKeySchema.safeParse(segments.join("/")).success) repos.push({ repoKey: segments.join("/"), pending });
+      for (const entry of entries) if (entry.isDirectory()) await walk(join(dir, entry.name), [...segments, entry.name]);
+    };
+    await walk(this.dir, []);
+    return repos.sort((a, b) => a.repoKey.localeCompare(b.repoKey));
+  }
+
   // Adds the proposals that are new: not pending already, not rejected before, and not the same as
   // a current fact. Returns the ones added. Every proposal passes the same checks as a saved fact.
   add(candidates: readonly NewProposal[], currentFacts: readonly FactListItem[]): Promise<Proposal[]> {
@@ -109,7 +122,8 @@ export class ProposalStore {
 
   // Applies an approved proposal to the store. The proposal is removed only after the store change
   // succeeded, so a failure leaves it pending to try again.
-  approve(id: string, repoKey: string, store: MemoryStore, edits: { subject?: string; body?: string; paths?: string[] }): Promise<void> {
+  // by "auto": approved without review because the repo has auto-approve on.
+  approve(id: string, repoKey: string, store: MemoryStore, edits: { subject?: string; body?: string; paths?: string[] }, by: "captured" | "auto" = "captured"): Promise<void> {
     return this.serialize(async () => {
       const proposal = (await this.list(repoKey)).find((candidate) => candidate.id === id);
       if (!proposal) throw new Error(`No proposal with id ${id} for this repo`);
@@ -117,7 +131,7 @@ export class ProposalStore {
       const body = edits.body ?? proposal.body;
       const paths = edits.paths ?? proposal.paths;
       assertNoSecret(subject, body);
-      const source = { by: "captured" as const, provider: proposal.source.provider, branch: null, commit: null };
+      const source = { by, provider: proposal.source.provider, branch: null, commit: null };
       switch (proposal.kind) {
         case "new":
           await store.create({ scope: "repo", repoKey, type: proposal.type, subject, body, paths, supersedes: null, source, citations: [] });

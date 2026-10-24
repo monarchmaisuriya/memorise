@@ -19,11 +19,13 @@ import {
   moveMemoryRpc,
   pinMemoryRpc,
   previewMemoryRpc,
+  proposalsSummaryRpc,
   rejectProposalRpc,
   restoreMemoryRpc,
   retireMemoryRpc,
   revertMemoryRpc,
   saveMemoryRpc,
+  scanProjectRpc,
   searchMemoriesRpc,
   setRepoPrefsRpc,
   tidyMemoryRpc,
@@ -36,6 +38,7 @@ import { buildMemorySection, INDEX_MAX_BYTES, withMemorySection, withoutMemorySe
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
+import type { PaseoApi } from "./paseo-types";
 import { supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
 import { RepoPrefs } from "./repo-prefs";
@@ -382,6 +385,35 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   });
 
   // Starts a tidy pass and returns at once; its proposals appear in the inbox when it finishes.
+  server.handle(proposalsSummaryRpc, async () => ({ repos: await (await runtime).proposals.summary() }));
+
+  // A checkout to read for a project scan: the given workspace folder, or the folder of an open
+  // workspace that belongs to the repo.
+  async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
+    if ("directory" in where) {
+      const repoKey = await readRepoKey(where.directory);
+      if (!repoKey) throw new Error("This folder is not in a git repo, so there is no project to read.");
+      return { repoKey, folder: where.directory };
+    }
+    if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
+    const { entries } = await paseo.workspaces.list();
+    for (const workspace of entries) {
+      const folder = workspace.workspaceDirectory ?? workspace.projectRootPath;
+      if (folder && (await readRepoKey(folder).catch(() => null)) === where.repoKey) return { repoKey: where.repoKey, folder };
+    }
+    throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
+  }
+
+  // Starts a project scan and returns at once; its proposals appear in the inbox when it finishes.
+  server.handle(scanProjectRpc, async ({ where, mode }, { paseo }) => {
+    const { capture } = await runtime;
+    capture.remember(paseo);
+    const { repoKey, folder } = await checkoutFor(where, paseo);
+    if (capture.isScanning(repoKey)) throw new Error("A project scan of this repo is already running; its proposals will appear here.");
+    void capture.scanProject(repoKey, folder, mode).catch((error: unknown) => console.error(`[memorise] project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
+    return { started: true as const, folder };
+  });
+
   // With a workspace folder, tidy also checks citations against that checkout.
   server.handle(tidyMemoryRpc, async ({ where }, { paseo }) => {
     const [{ capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
