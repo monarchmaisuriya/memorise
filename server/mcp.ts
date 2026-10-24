@@ -110,7 +110,7 @@ export class MemoryMcp {
 
   private requireRepo(scope: AgentScope): string {
     if (scope.repoKey) return scope.repoKey;
-    throw new Error("This agent's folder is not in a git repo, so it has no repo memory. Only the user can save global memories, with /remember --global.");
+    throw new Error("This agent has no project memory (its folder could not be read when it started). Only the user can save global memories, with /remember --global.");
   }
 
   private takeWriteSlot(repoKey: string): void {
@@ -131,7 +131,7 @@ export class MemoryMcp {
   // so a later change to that file can be detected. Paths are relative to the repo root.
   private async pinCitations(cwd: string, citations: { path: string; lines?: string }[], commit: string | null): Promise<Citation[]> {
     if (citations.length === 0) return [];
-    if (!commit) throw new Error("This repo has no commit yet, so citations cannot be pinned. Save the fact without citations.");
+    if (!commit) throw new Error("Citations are pinned to a git commit, and this project has none (it is not in git, or has no commit yet). Save the fact without citations.");
     const pinned: Citation[] = [];
     for (const citation of citations) {
       const path = citation.path.trim().replace(/^(\.\/)+/, "").replace(/\/{2,}/g, "/");

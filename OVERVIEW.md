@@ -2,7 +2,7 @@ Memorise gives Claude, Codex, and OpenCode agents one shared memory. A fact lear
 
 ## How it works
 
-Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/memorise/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share.
+Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/memorise/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share. A folder outside git is a project of its own, grouped by its path, with the same features except ranking by changed files and citations, which need git.
 
 When a supported agent is created, the plugin adds two things to it:
 
@@ -13,7 +13,7 @@ A memory about code can cite files by their path from the repository root, or na
 
 ## Capture, tidy, and project scans (optional)
 
-Capture is off until you turn it on. When it is on and a session has been idle for a while (20 minutes by default), a background agent reads what happened since the last capture and proposes memories. Tidy, run from the Memory panel or weekly, proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. A project scan ("Create from project" or "Re-check against project") proposes memories from the repository's README, docs, and build files, or fixes to saved ones those files contradict. Proposals wait in the Proposed tab and in the manager's Proposals view; nothing reaches an agent until you approve it, and you can edit the wording first. A repository can turn on auto-approve, which saves new memories from capture and project scans without review and marks them "auto". A finished capture adds a "memories proposed" card to the session's chat; the card is never sent to the model.
+Capture is off until you turn it on. When it is on and a session has been idle for a while (20 minutes by default), a background agent reads what happened since the last capture and proposes memories. Tidy, run from the Memory panel or weekly, proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. A project scan ("Create from project" or "Re-check against project") proposes memories from the repository's README, docs, and build files, or fixes to saved ones those files contradict. Proposals wait in the Proposed tab and in the manager's Proposals view; nothing reaches an agent until you approve it, and you can edit the wording first. A repository can turn on auto-approve, which saves new memories from capture and project scans without review and marks them "auto". Project scans can also run on their own, once per project with an open workspace or weekly (Settings, off by default). A finished capture adds a "memories proposed" card to the session's chat; the card is never sent to the model.
 
 The background agents read text that may contain instructions planted in a session, so their tools are switched off through each provider's own options, they run in an empty folder of their own, and the plugin denies every permission request they make:
 
@@ -53,4 +53,4 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 - Search matches words, not meaning. If the search index cannot be opened, keyword search is off and search by files still works.
 - Paseo does not replay events, so sessions that end while the plugin is stopped are not captured. A capture that fails is retried at the next idle, within the daily limit.
 - With OpenCode, the notes always reach the agent, but some models follow Code Mode's instruction to use only `execute` and skip the memory tools, which Paseo connects as ordinary tools. Asking the agent to list its tools, or using a model that calls ordinary tools, works around it.
-- Tested with Paseo 0.12.0 on macOS, with Claude, Codex, and OpenCode. Requires git on the daemon host.
+- Tested with Paseo 0.12.0 on macOS, with Claude, Codex, and OpenCode. Requires git on the daemon host (folders outside git work too).

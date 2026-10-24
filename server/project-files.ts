@@ -1,6 +1,6 @@
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { git } from "./git";
+import { projectRoot } from "./repo-key";
 import { redactSecrets } from "./secrets";
 
 export const MAX_FILE_BYTES = 8 * 1024;
@@ -21,12 +21,6 @@ export interface ProjectFile {
 const PACKAGE_FIELDS = ["name", "scripts", "engines", "packageManager", "workspaces"] as const;
 const MANIFESTS = ["package.json", "Makefile", "justfile", "pyproject.toml", "Cargo.toml", "go.mod", ".tool-versions", ".nvmrc"];
 const INSTRUCTIONS = ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"];
-
-async function repoRoot(cwd: string): Promise<string> {
-  const top = await git(cwd, ["rev-parse", "--show-toplevel"], 2_000).catch(() => "");
-  if (!top) throw new Error(`${cwd} is not in a git repo, so there is no project to read`);
-  return realpath(top);
-}
 
 // Only regular files with one link whose real path stays inside the repo: a symlink, a hard link, or
 // a file reached through a symlinked folder is never read. Only the start of a file is read, and a
@@ -72,7 +66,7 @@ async function namesMatching(dir: string, pattern: RegExp): Promise<string[]> {
 // text removed. Instruction files and manifests come first, as they are short and the scan needs them
 // most; a file that would pass the total cap is left out and the smaller ones after it still fit.
 export async function readProjectFiles(cwd: string): Promise<ProjectFile[]> {
-  const root = await repoRoot(cwd);
+  const root = await projectRoot(cwd);
   const readme = (await namesMatching(root, /^readme(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
   const contributing = (await namesMatching(root, /^contributing(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
   const docs = (await namesMatching(join(root, "docs"), DOC_NAME)).slice(0, MAX_DOCS).map((name) => `docs/${name}`);

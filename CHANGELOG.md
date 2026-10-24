@@ -4,6 +4,20 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-24
+
+### Added
+
+- Memory for folders outside git. A folder that is not in a git repository is a project of its own, keyed by its path with its name in the key (such as `folder/notes-3f9a1c2b7d4e`). It has the features a repository has: memories and agent write tools, the manager and panel, capture, tidy, project scans, auto-approve, switches, and import and export. Ranking by changed files and citations need git history and are not available there.
+- "Create memories from projects automatically" in Settings, off by default: once per project, or once and then a weekly re-check, for every project with an open Paseo workspace, git or not. Scans start when a workspace is created, when the plugin starts, and hourly, one at a time. They use at most half the daily limit of background runs, retry a failed first scan a day later, and skip projects with memory or capture turned off.
+
+### Changed
+
+- Agents in a folder outside git get that folder's memories and the write tools, instead of global memories only.
+- A scan started by hand is remembered, so an automatic "once" scan does not repeat it.
+- A project scan in a git repo reads from the repository root, and a git failure stops the scan instead of reading the current folder.
+- A remote whose host is `folder` or `local` no longer maps onto the keys Memorise makes for folders and origin-less repos.
+
 ## [0.4.1] - 2026-10-24
 
 ### Fixed
@@ -87,7 +101,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.5.0
 [0.4.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.1
 [0.4.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.0
 [0.3.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.3.0

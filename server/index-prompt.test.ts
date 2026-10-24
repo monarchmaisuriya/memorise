@@ -39,6 +39,13 @@ function fact(overrides: Partial<FactListItem> = {}): FactListItem {
 const base = { repoKey: "github.com/acme/api", notes: new Map<string, string>(), maxLines: 150, toolsAvailable: true, problems: [] };
 
 describe("memory section", () => {
+  it("tells agents in a folder outside git to name files by path, not to cite them", () => {
+    const folder = buildMemorySection({ ...base, repoKey: "folder/notes-0123456789ab", facts: [] }).text;
+    expect(folder).toContain("no citations (they need git)");
+    expect(folder).not.toContain("cite the files it is about");
+    expect(buildMemorySection({ ...base, facts: [] }).text).toContain("cite the files it is about");
+  });
+
   it("is added once even when a parent prompt already carries one", () => {
     const parent = withMemorySection("Be brief.", buildMemorySection({ ...base, facts: [fact()] }).text);
     const child = withMemorySection(parent, buildMemorySection({ ...base, facts: [fact()] }).text);

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { Capture } from "./capture";
 import { buildCapturePrompt, parseCandidates, parseTidyActions } from "./extractor";
 import type { AgentTimelineItem, PaseoApi } from "./paseo-types";
 import { ProposalStore, proposalHash } from "./proposals";
+import { readRepoKey } from "./repo-key";
 import { RepoPrefs } from "./repo-prefs";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -35,8 +36,10 @@ function conversation(userTurns: number, extra: AgentTimelineItem[] = []): Agent
 
 // A fake of the slice of the Paseo API capture uses: timeline refetch and append, agent create with
 // a scripted worker reply, archive.
-function fakePaseo(items: AgentTimelineItem[], reply: string) {
+function fakePaseo(items: AgentTimelineItem[], reply: string, openFolders: string[] = [], workerMs = 0) {
   const created: Array<Record<string, any>> = [];
+  // How many workers ran at once, at most.
+  const running = { now: 0, most: 0 };
   const appended: unknown[] = [];
   const archived: string[] = [];
   const paseo = {
@@ -64,7 +67,13 @@ function fakePaseo(items: AgentTimelineItem[], reply: string) {
         return {
           id: `worker-${created.length}`,
           workspaceId: `ws-${created.length}`,
-          waitForFinish: async () => ({ status: "idle", final: null, error: null, lastMessage: reply }),
+          waitForFinish: async () => {
+            running.now += 1;
+            running.most = Math.max(running.most, running.now);
+            await new Promise((done) => setTimeout(done, workerMs));
+            running.now -= 1;
+            return { status: "idle", final: null, error: null, lastMessage: reply };
+          },
           archive: async () => {
             archived.push(`worker-${created.length}`);
             return {};
@@ -72,10 +81,13 @@ function fakePaseo(items: AgentTimelineItem[], reply: string) {
         };
       },
     },
-    workspaces: { archive: async (id: string) => archived.push(id) },
+    workspaces: {
+      archive: async (id: string) => archived.push(id),
+      list: async () => ({ entries: openFolders.map((folder) => ({ projectRootPath: folder })), pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+    },
     providers: { listModels: async (provider: string) => ({ models: [{ provider, id: `${provider}-small` }, { provider, id: `${provider}-default`, isDefault: true }] }) },
   } as unknown as PaseoApi;
-  return { paseo, created, appended, archived };
+  return { paseo, created, appended, archived, running };
 }
 
 describe("capture", () => {
@@ -148,6 +160,102 @@ describe("capture", () => {
     expect(await (await capture.startTidy(REPO, null)).done).toBe(1);
     expect((await proposals.list(REPO)).map((proposal) => proposal.kind)).toEqual(["merge"]);
     expect((await store.list(REPO)).filter((fact) => !fact.superseded && fact.status === "active")).toHaveLength(2);
+  });
+
+  it("with automatic scans off, a sweep scans nothing", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }), [cwd]);
+    capture.remember(fake.paseo);
+    expect(await capture.sweepProjects()).toEqual([]);
+    expect(fake.created).toHaveLength(0);
+  });
+
+  it("scans each open project once when set to once, from the first sight of Paseo, one at a time, counting a scan you started", async () => {
+    values = { ...values, projectAutoScan: "once" };
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const notes = tempDir("notes-");
+    await writeFile(join(notes, "README.md"), "Trip notes.\n");
+    const open = [cwd, notes];
+    const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev", body: "Run make dev.", paths: [] }] }), open, 20);
+    capture.remember(fake.paseo);
+    await vi.waitFor(async () => expect(capture.lastRun(await readRepoKey(notes))).toMatchObject({ state: "done" }));
+    expect(fake.created).toHaveLength(2);
+    expect(fake.running.most).toBe(1);
+    expect(fake.created[0].prompt).not.toContain("Also check each saved fact");
+    const manual = tempDir("manual-");
+    await writeFile(join(manual, "README.md"), "Scanned by hand.\n");
+    open.push(manual);
+    await (await capture.startScan(await readRepoKey(manual), manual, "create")).done;
+    expect(await capture.sweepProjects()).toEqual([]);
+    // Not again, even weeks later.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([]);
+    expect(fake.created).toHaveLength(3);
+  });
+
+  it("re-checks a project a week after its last scan when set to weekly", async () => {
+    values = { ...values, projectAutoScan: "weekly" };
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [], actions: [] }), [cwd]);
+    capture.remember(fake.paseo);
+    await vi.waitFor(() => expect(capture.lastRun(REPO)).toMatchObject({ state: "done" }));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 6 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([]);
+    vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([REPO]);
+    expect(fake.created[1].prompt).toContain("Also check each saved fact");
+    expect(fake.created).toHaveLength(2);
+  });
+
+  it("never scans worker folders, or projects with memory or capture off here", async () => {
+    const off = tempDir("off-");
+    const noCapture = tempDir("nocap-");
+    const worker = join(workersDir(root), "w1");
+    await mkdir(worker, { recursive: true });
+    for (const folder of [off, noCapture, worker]) await writeFile(join(folder, "README.md"), "Notes.\n");
+    await repoPrefs.set(await readRepoKey(off), { enabled: false });
+    await repoPrefs.set(await readRepoKey(noCapture), { capture: "off" });
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }), [off, noCapture, worker]);
+    capture.remember(fake.paseo);
+    values = { ...values, projectAutoScan: "once" };
+    expect(await capture.sweepProjects()).toEqual([]);
+    expect(await capture.scanIfDue(await readRepoKey(worker), worker)).toBe(false);
+    await expect(capture.startScan(await readRepoKey(worker), worker, "create")).rejects.toThrow(/worker folders are never scanned/);
+    expect(fake.created).toHaveLength(0);
+  });
+
+  it("retries a failed first scan a day later, not hourly", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const fake = fakePaseo([], "not json");
+    capture.remember(fake.paseo);
+    values = { ...values, projectAutoScan: "once" };
+    expect(await capture.scanIfDue(REPO, cwd)).toBe(false);
+    expect(capture.lastRun(REPO)).toMatchObject({ state: "failed" });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 60 * 60_000);
+    expect(await capture.scanIfDue(REPO, cwd)).toBe(false);
+    expect(fake.created).toHaveLength(1);
+    vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
+    expect(await capture.scanIfDue(REPO, cwd)).toBe(false);
+    expect(fake.created).toHaveLength(2);
+  });
+
+  it("leaves half the daily limit to capture and you, and scans the next day", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const other = tempDir("other-");
+    await writeFile(join(other, "README.md"), "Other.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }));
+    capture.remember(fake.paseo);
+    values = { ...values, projectAutoScan: "once", captureMaxPerDay: 4 };
+    for (let run = 0; run < 2; run += 1) await (await capture.startScan(await readRepoKey(other), other, "create")).done;
+    expect(await capture.scanIfDue(REPO, cwd)).toBe(false);
+    expect(fake.created).toHaveLength(2);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
+    expect(await capture.scanIfDue(REPO, cwd)).toBe(true);
+    expect(fake.created).toHaveLength(3);
   });
 
   it("with auto mode on, saves new memories marked auto and leaves changes for review", async () => {
@@ -296,7 +404,17 @@ describe("capture", () => {
     expect(fake.created[0].outputSchema).toBeUndefined();
   });
 
-  it("skips short sessions, its own workers, repos without git, and runs over the daily cap", async () => {
+  it("captures a session in a folder outside git into that folder's own memory", async () => {
+    const plain = tempDir("plain-");
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow({ ...agent, cwd: plain })).toBe(1);
+    const folder = await readRepoKey(plain);
+    expect(folder).toMatch(/^folder\//);
+    expect((await proposals.list(folder)).map((proposal) => proposal.subject)).toEqual(["integration tests"]);
+  });
+
+  it("skips short sessions, its own workers, and runs over the daily cap", async () => {
     const fake = fakePaseo(conversation(2), reply);
     capture.remember(fake.paseo);
     expect(await capture.captureNow(agent)).toBe(0);
@@ -309,10 +427,8 @@ describe("capture", () => {
     expect(fake.created).toHaveLength(0);
     vi.useRealTimers();
 
-    const plain = tempDir("plain-");
     const long = fakePaseo(conversation(5), reply);
     capture.remember(long.paseo);
-    expect(await capture.captureNow({ ...agent, cwd: plain })).toBe(0);
 
     values = { ...values, captureMaxPerDay: 1 };
     expect(await capture.captureNow(agent)).toBe(1);

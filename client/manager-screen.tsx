@@ -2,7 +2,7 @@ import { type PluginScreenProps, useRpc } from "@getpaseo/plugin/client";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { type BulkAction, bulkMemoryRpc, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, proposalsSummaryRpc, searchMemoriesRpc, tidyMemoryRpc } from "../shared/memory";
+import { type BulkAction, bulkMemoryRpc, isFolderKey, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, proposalsSummaryRpc, searchMemoriesRpc, tidyMemoryRpc } from "../shared/memory";
 import { FactCard } from "./fact-card";
 import { FactEditor } from "./fact-editor";
 import { Inbox } from "./inbox";
@@ -124,7 +124,7 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
   return (
     <View style={{ gap: 12 }}>
       <Text style={styles.title}>{repoKey ?? "Global memory"}</Text>
-      <Text style={styles.muted}>{repoKey ? "Shared by every clone and worktree of this repo." : "Your own memories; they reach agents in every repo."}</Text>
+      <Text style={styles.muted}>{repoKey ? (isFolderKey(repoKey) ? "A folder outside git: its memories reach agents started in this folder." : "Shared by every clone and worktree of this repo.") : "Your own memories; they reach agents in every repo."}</Text>
       {repoKey && (
         <View style={styles.row}>
           <Chip label="Memories" on={tab === "memories"} onPress={() => setTab("memories")} styles={styles} />

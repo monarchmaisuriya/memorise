@@ -38,6 +38,7 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     respondToPermission,
     create: (config: Record<string, unknown>, env?: Record<string, string>) => (before.get("agent.create") as (input: unknown, context: unknown) => Promise<{ config: Record<string, any> }>)({ request: { config, ...(env ? { env } : {}) } }, { paseo }),
     call: (name: string, input: unknown) => (rpc.get(name) as (input: unknown, context: unknown) => Promise<any>)(input, { paseo }),
+    workspaceCreated: (cwd: string) => (on.get("workspace.created") as (event: unknown, context: unknown) => Promise<void>)({ workspace: { id: "ws-1", projectId: "p-1", cwd, name: null, archivedAt: null } }, { paseo }),
     permission: (request: Record<string, unknown>, cwd = "/tmp") => (on.get("agent.permission_requested") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id: "agent-1", cwd }, request }, { paseo }),
   };
 }
@@ -125,10 +126,18 @@ describe("memorise server entry", () => {
     expect(fake.respondToPermission).not.toHaveBeenCalled();
   });
 
-  it("refuses a repo memory outside a git repo and a secret-shaped one", async () => {
+  it("keeps a folder outside git as its own project, for agents and the app, and refuses a secret-shaped memory", async () => {
     const fake = start();
     const plain = tempDir("plain-");
-    await expect(fake.call("memory.save", { where: { directory: plain }, scope: "repo", type: "howto", subject: "x", body: "y" })).rejects.toThrow(/not in a git repo/);
+    const { fact } = await fake.call("memory.save", { where: { directory: plain }, scope: "repo", type: "howto", subject: "notes", body: "Drafts live in drafts/." });
+    expect(fact.repoKey).toMatch(/^folder\/plain-/);
+    const errors = vi.spyOn(console, "error");
+    const { config } = await fake.create({ provider: "claude", cwd: plain });
+    // No git history to diff, so changed files are not asked for (and no error is logged).
+    expect(errors.mock.calls.flat().join("\n")).not.toMatch(/changed files/);
+    errors.mockRestore();
+    expect(config.systemPrompt).toContain("notes: Drafts live in drafts/.");
+    expect(Object.keys(config.mcpServers)).toEqual(["paseo-memorise", "paseo-memorise-write"]);
     await expect(fake.call("memory.save", { where: { directory: plain }, scope: "global", type: "howto", subject: "x", body: "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789" })).rejects.toThrow(/GitHub token/);
   });
 
@@ -380,6 +389,16 @@ describe("memorise server entry", () => {
     }
   });
 
+  it("scans a new workspace's project when automatic scans are on, and the inbox says how it went", async () => {
+    const fake = start({ ...defaults, projectAutoScan: "once" });
+    const cwd = tempDir("plugin-plain-");
+    await writeFile(join(cwd, "README.md"), "Notes.\n");
+    // The hook returns before the scan finishes, which takes longer than Paseo waits for a hook.
+    await fake.workspaceCreated(cwd);
+    // The fake Paseo cannot start a worker, so the scan that started fails, and the inbox is told.
+    await vi.waitFor(async () => expect((await fake.call("memory.proposals.list", { where: { directory: cwd } })).lastRun).toMatchObject({ kind: "scan", state: "failed" }));
+  });
+
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
     const fake = start();
     const repo = { repoKey: "github.com/acme/api" };
@@ -400,13 +419,18 @@ describe("memorise server entry", () => {
     const api = await repoWithOrigin("git@github.com:acme/api.git");
     const web = await repoWithOrigin("git@github.com:acme/web.git");
     const notGit = tempDir("plugin-plain-");
-    // One workspace per page in the fake, so the web workspace is on the third page.
-    fake.workspaces.push({ workspaceDirectory: api, projectRootPath: api }, { projectRootPath: notGit }, { projectRootPath: web });
+    // One workspace per page in the fake, so the web workspace is on the fourth page.
+    // The plugin's own worker folders are never listed as projects.
+    const worker = join(root, "workers", "w1");
+    await mkdir(worker, { recursive: true });
+    fake.workspaces.push({ workspaceDirectory: api, projectRootPath: api }, { projectRootPath: notGit }, { projectRootPath: worker }, { projectRootPath: web });
     const source = { from: "capture" as const, agentId: null, provider: "claude", model: null };
     await new ProposalStore(root).add([{ repoKey: "github.com/acme/docs", kind: "new", targets: [], type: "howto", subject: "docs", body: "Docs build with mkdocs.", paths: [], reason: "", source }], []);
     const { repos } = await fake.call("memory.repos", {});
     expect(repos).toEqual([
       { repoKey: null, active: 0, retired: 0, lastModified: null },
+      // A workspace folder outside git is a project of its own.
+      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null },
       { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String) },
       { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null },
       { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null },

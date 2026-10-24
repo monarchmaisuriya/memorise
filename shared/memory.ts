@@ -37,6 +37,11 @@ export const repoKeySchema = z
   .regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9._~-]+)+$/, "Expected a repo key such as github.com/owner/repo")
   .refine((key) => !key.split("/").includes(".."), "A repo key cannot contain '..'");
 
+// A folder outside git is keyed "folder/<name>-<hash>" (see server/repo-key.ts).
+export function isFolderKey(repoKey: string): boolean {
+  return repoKey.startsWith("folder/");
+}
+
 export const citationSchema = z.object({
   path: z
     .string()
@@ -400,6 +405,9 @@ export const memorySettings = defineSettings({
     tidyProvider: providerSchema.default("claude"),
     tidyModel: z.string().trim().max(100).default(""),
     tidyWeekly: z.boolean().default(false),
+    // Project scans started by the plugin for every project with an open workspace: never, once per
+    // project, or once and then a re-check each week.
+    projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),
   }),
 });
 export type MemorySettings = z.infer<typeof memorySettings.schema>;

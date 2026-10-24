@@ -9,6 +9,7 @@ import {
   exportMemoryRpc,
   importMemoryRpc,
   listMemoriesRpc,
+  isFolderKey,
   listProposalsRpc,
   listReposRpc,
   MAX_BULK_IDS,
@@ -49,6 +50,7 @@ import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
 import { PathMatcher, workFiles } from "./work-files";
+import { openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
 
 const CITATION_BUDGET_MS = 1_000;
@@ -97,6 +99,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const repoPrefs = new RepoPrefs(root);
     const capture = new Capture({ root, store, proposals, usage, repoPrefs, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
+    capture.startProjectScans();
     const { mcpPort } = await currentSettings();
     const mcp = new MemoryMcp({
       store,
@@ -133,7 +136,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     });
     const prefs = repoKey ? await repoPrefs.get(repoKey) : null;
     if (prefs && !prefs.enabled) return { off: true as const, repoKey };
-    const changed = repoKey
+    // A folder outside git has no history, so no files are known to be changed.
+    const changed = repoKey && !isFolderKey(repoKey)
       ? await workFiles(cwd).catch((error: unknown) => {
           console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
           return [];
@@ -202,6 +206,18 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     await paseo.agents.ref(agent.id).respondToPermission({ requestId: request.id, response: { behavior: "allow" } });
   });
 
+  // A new workspace's project is queued for a scan when automatic project scans are on and it is due.
+  // The hook returns at once: a scan takes longer than Paseo waits for a hook. Workspaces of the
+  // plugin's own workers are never scanned.
+  server.on("workspace.created", async ({ workspace }, { paseo }) => {
+    const { capture } = await runtime;
+    capture.remember(paseo);
+    if (capture.isWorker("", workspace.cwd)) return;
+    void readRepoKey(workspace.cwd)
+      .then((repoKey) => capture.scanIfDue(repoKey, workspace.cwd))
+      .catch((error: unknown) => console.error(`[memorise] automatic project scan of ${workspace.cwd}: ${error instanceof Error ? error.message : String(error)}`));
+  });
+
   server.on("agent.turn_started", async ({ agent }) => {
     const { capture } = await runtime;
     capture.onTurnStarted(agent.id);
@@ -224,7 +240,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned, activation, enabled, until }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (scope === "repo" && !repoKey) throw new Error("directory" in where ? "This folder is not in a git repo; save the memory as global instead." : "No repo was chosen; save the memory as global instead.");
+    if (scope === "repo" && !repoKey) throw new Error("No repo was chosen; save the memory as global instead.");
     assertNoSecret(subject, body);
     const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, activation, enabled, until, supersedes: null, source: BY_USER, citations: [] });
     return { fact };
@@ -310,8 +326,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // Every repo the manager can work on: those with memories (with counts), those with an open Paseo
   // workspace, and those with proposals waiting. Global comes first, then repos by key.
   server.handle(listReposRpc, async (_input, { paseo }) => {
-    const { store, proposals } = await runtime;
-    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo), proposals.summary()]);
+    const { store, proposals, root } = await runtime;
+    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo, root), proposals.summary()]);
     const known = new Set(withMemories.map((repo) => repo.repoKey));
     const others = [...new Set([...open.keys(), ...waiting.map((repo) => repo.repoKey)])].filter((repoKey) => !known.has(repoKey));
     const repos = [...withMemories, ...others.map((repoKey) => ({ repoKey, active: 0, retired: 0, lastModified: null }))];
@@ -395,38 +411,14 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(proposalsSummaryRpc, async () => ({ repos: await (await runtime).proposals.summary() }));
 
-  // The repo of every open Paseo workspace, across every page, with one checkout of each. A project's
-  // main checkout is preferred over a worktree of a branch; a folder that is gone or not in git is
-  // skipped.
-  async function openRepoCheckouts(paseo: PaseoApi): Promise<Map<string, string>> {
-    const checkouts = new Map<string, string>();
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const { entries, pageInfo } = await paseo.workspaces.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
-      for (const workspace of entries) {
-        for (const folder of [workspace.projectRootPath, workspace.workspaceDirectory]) {
-          if (!folder || seen.has(folder)) continue;
-          seen.add(folder);
-          const repoKey = await readRepoKey(folder).catch(() => null);
-          if (repoKey && !checkouts.has(repoKey)) checkouts.set(repoKey, folder);
-        }
-      }
-      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
-    } while (cursor);
-    return checkouts;
-  }
-
   // A checkout to read for a project scan: the given workspace folder, or the folder of an open
   // workspace that belongs to the repo.
   async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
     if ("directory" in where) {
-      const repoKey = await readRepoKey(where.directory);
-      if (!repoKey) throw new Error("This folder is not in a git repo, so there is no project to read.");
-      return { repoKey, folder: where.directory };
+      return { repoKey: await readRepoKey(where.directory), folder: where.directory };
     }
     if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
-    const folder = (await openRepoCheckouts(paseo)).get(where.repoKey);
+    const folder = (await openRepoCheckouts(paseo, (await runtime).root)).get(where.repoKey);
     if (folder) return { repoKey: where.repoKey, folder };
     throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
   }

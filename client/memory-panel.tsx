@@ -2,7 +2,7 @@ import { type PluginWorkspacePanelProps, useRpc, useWorkspace } from "@getpaseo/
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { listMemoriesRpc, type Scope } from "../shared/memory";
+import { isFolderKey, listMemoriesRpc, type Scope } from "../shared/memory";
 import { FactCard } from "./fact-card";
 import { FactEditor } from "./fact-editor";
 import { Inbox } from "./inbox";
@@ -34,7 +34,7 @@ export function MemoryPanel({ theme, layout, workspaceId, openManager }: PluginW
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Memorise</Text>
-      <Text style={styles.muted}>{repoKey ? `Repo ${repoKey}, plus global memories. Shared by every workspace of this repo.` : "This folder is not in a git repo; only global memories apply."}</Text>
+      <Text style={styles.muted}>{repoKey ? (isFolderKey(repoKey) ? `Folder ${repoKey}, plus global memories. A folder outside git is a project of its own.` : `Repo ${repoKey}, plus global memories. Shared by every workspace of this repo.`) : "Only global memories apply."}</Text>
       <View style={styles.row}>
         <Chip label="Memories" on={tab === "memories"} onPress={() => setTab("memories")} styles={styles} />
         {repoKey && <Chip label="Proposed" on={tab === "proposed"} onPress={() => setTab("proposed")} styles={styles} />}
