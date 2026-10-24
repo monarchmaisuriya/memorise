@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-24
+
+### Fixed
+
+- Background runs (capture, tidy, project scans) no longer leave a project named after a random id (such as `01M5QD6…`) in Paseo's sidebar. Each run used to make a workspace on a new folder, which made Paseo create a project that showed once the workspace was archived. Every worker now runs in one hidden workspace on the plugin's worker folder, made once and never archived.
+
 ## [0.6.0] - 2026-10-24
 
 ### Added
@@ -116,7 +122,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.1
 [0.6.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.0
 [0.5.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.5.0
 [0.4.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.1

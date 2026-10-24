@@ -1,13 +1,12 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { PaseoApi } from "./paseo-types";
 import type { Provider } from "./providers";
-import { newFactId } from "./store";
 
 // Background "worker" agents run the capture and tidy passes. They read untrusted text, so each one
-// runs with its provider's tools switched off through provider options, in a restricted mode, in an
-// empty folder of its own, and the plugin denies every permission request a worker raises. Workers
-// never get memory themselves, and their own turns are never captured.
+// runs with its provider's tools switched off through provider options, in a restricted mode, in the
+// plugin's empty worker folder, and the plugin denies every permission request a worker raises.
+// Workers never get memory themselves, and their own turns are never captured.
 export const WORKER_ENV = "MEMORISE_ROLE";
 export const WORKER_ROLE = "worker";
 
@@ -67,21 +66,46 @@ export async function resolveModel(paseo: PaseoApi, provider: Provider, model: s
   return `${provider}/${chosen.id}`;
 }
 
-// Runs one worker to completion and returns its final message. The worker, its workspace, and its
-// folder are removed afterwards whatever happens.
+export const WORKER_WORKSPACE_TITLE = "Memorise background work";
+const workspaceLookups = new Map<string, Promise<string>>();
+
+// The one hidden workspace that holds every worker, on the worker folder. Paseo makes a project for
+// each new workspace folder, and shows that project in the sidebar once its last workspace is
+// archived (checked live), so a workspace per run left a project behind per run. This workspace is
+// made once, found again on later runs (and made again if it was archived), and never archived.
+// Lookups for one folder run one at a time, so two workers starting together share one workspace.
+export function workerWorkspace(paseo: PaseoApi, root: string): Promise<string> {
+  const dir = workersDir(root);
+  const next = (workspaceLookups.get(dir) ?? Promise.resolve("")).catch(() => "").then(async () => {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const real = await realpath(dir);
+    let cursor: string | undefined;
+    do {
+      const { entries, pageInfo } = await paseo.workspaces.list({ includeBackground: true, page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+      const found = entries.find((workspace) => [workspace.workspaceDirectory, workspace.projectRootPath].some((folder) => folder !== undefined && (resolve(folder) === real || resolve(folder) === resolve(dir))));
+      if (found) return found.id;
+      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
+    } while (cursor);
+    const created = await paseo.workspaces.create({ source: { kind: "directory", path: dir }, background: true, title: WORKER_WORKSPACE_TITLE });
+    return created.id;
+  });
+  workspaceLookups.set(dir, next);
+  return next;
+}
+
+// Runs one worker to completion in the hidden worker workspace and returns its final message. The
+// worker is archived afterwards whatever happens; the workspace stays.
 export async function runWorker(paseo: PaseoApi, root: string, job: WorkerJob, onCreated: (agentId: string) => void): Promise<string> {
-  const cwd = join(workersDir(root), newFactId());
-  await mkdir(cwd, { recursive: true, mode: 0o700 });
+  const workspaceId = await workerWorkspace(paseo, root);
   let handle: Awaited<ReturnType<PaseoApi["agents"]["create"]>> | null = null;
   try {
-    handle = await paseo.agents.create({
-      cwd,
+    // Created through the workspace, so Paseo places the worker in it instead of making a new one.
+    handle = await paseo.workspaces.ref(workspaceId).agents.create({
       title: job.title,
       config: { provider: await resolveModel(paseo, job.provider, job.model), modeId: RESTRICTED_MODES[job.provider], options: LOCKDOWN_OPTIONS[job.provider], mcpServers: {} },
       env: { [WORKER_ENV]: WORKER_ROLE },
       prompt: job.prompt,
       ...(job.provider === "opencode" ? {} : { outputSchema: job.outputSchema }),
-      background: true,
     });
     onCreated(handle.id);
     const deadline = Date.now() + job.timeoutMs;
@@ -104,10 +128,7 @@ export async function runWorker(paseo: PaseoApi, root: string, job: WorkerJob, o
       return result.lastMessage;
     }
   } finally {
-    const workspaceId = handle?.workspaceId ?? null;
     await handle?.archive().catch((error: unknown) => console.error(`[memorise] could not archive worker ${handle?.id}: ${String(error)}`));
-    if (workspaceId) await paseo.workspaces.archive(workspaceId).catch((error: unknown) => console.error(`[memorise] could not archive worker workspace ${workspaceId}: ${String(error)}`));
-    await rm(cwd, { recursive: true, force: true });
   }
 }
 
