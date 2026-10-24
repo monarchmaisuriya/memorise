@@ -9,6 +9,7 @@ import type { PaseoApi } from "./paseo-types";
 import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
+import type { RepoPrefs } from "./repo-prefs";
 import type { MemoryStore } from "./store";
 import { sliceTranscript } from "./transcript";
 import { usageOf, type UsageLog } from "./usage";
@@ -40,6 +41,7 @@ export interface CaptureDeps {
   store: MemoryStore;
   proposals: ProposalStore;
   usage: UsageLog;
+  repoPrefs: RepoPrefs;
   settings(): Promise<MemorySettings>;
 }
 
@@ -172,7 +174,8 @@ export class Capture {
     this.remember(paseo);
     if (this.isWorker(agent.id, agent.cwd) || !supportedProvider(agent.provider)) return;
     const values = await this.deps.settings();
-    if (!values.captureEnabled) return;
+    const repoKey = await readRepoKey(agent.cwd).catch(() => null);
+    if (!repoKey || !(await this.captureOn(values, repoKey))) return;
     clearTimeout(this.timers.get(agent.id));
     this.timers.set(
       agent.id,
@@ -181,6 +184,12 @@ export class Capture {
         void this.captureNow(agent).catch((error: unknown) => console.error(`[memorise] capture for agent ${agent.id} failed: ${String(error)}`));
       }, values.captureIdleMinutes * MINUTE_MS),
     );
+  }
+
+  // A repo's own capture preference overrides the host setting.
+  private async captureOn(values: MemorySettings, repoKey: string): Promise<boolean> {
+    const { capture } = await this.deps.repoPrefs.get(repoKey);
+    return capture === "default" ? values.captureEnabled : capture === "on";
   }
 
   // One capture pass for one agent. Returns how many proposals it added.
@@ -193,10 +202,10 @@ export class Capture {
       const provider = values.captureProvider === "session" ? supportedProvider(agent.provider) : values.captureProvider;
       // A model id belongs to one provider, so it applies only when one provider reads every session.
       const model = values.captureProvider === "session" ? "" : values.captureModel;
-      if (!values.captureEnabled || !provider) return 0;
+      if (!provider) return 0;
       const repoKey = await readRepoKey(agent.cwd).catch(() => null);
       // Captured memories belong to a repo; global memories come only from the user.
-      if (!repoKey) return 0;
+      if (!repoKey || !(await this.captureOn(values, repoKey))) return 0;
       const previous = (await this.readState()).agents[agent.id];
       const fresh = await this.newEntries(paseo, agent.id, previous);
       const cursor = { epoch: fresh.epoch, seq: fresh.end };

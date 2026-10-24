@@ -257,6 +257,43 @@ describe("memorise server entry", () => {
     expect((await fake.call("memory.list", { where })).facts.filter((item: { enabled: boolean }) => !item.enabled)).toHaveLength(2);
   });
 
+  it("previews exactly what a new agent gets, with why each memory is listed", async () => {
+    const fake = start();
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    const where = { directory: cwd };
+    const { fact: pinned } = await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "lint", body: "Run pnpm lint.", pinned: true });
+    const { fact: title } = await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "deploy", body: "Long steps.", activation: "title" });
+    const { fact: global } = await fake.call("memory.save", { where, scope: "global", type: "preference", subject: "commits", body: "Small commits." });
+    const preview = await fake.call("memory.preview", { directory: cwd });
+    expect(preview).toMatchObject({ repoKey: "github.com/acme/api", off: false });
+    expect(preview.listed).toEqual([
+      { id: pinned.id, subject: "lint", reason: "pinned", titleOnly: false },
+      { id: global.id, subject: "commits", reason: "global", titleOnly: false },
+      { id: title.id, subject: "deploy", reason: "repo", titleOnly: true },
+    ]);
+    const { config } = await fake.create({ provider: "claude", cwd });
+    expect(config.systemPrompt).toContain(preview.text);
+    expect(preview.bytes).toBe(Buffer.byteLength(preview.text));
+  });
+
+  it("turns memory off for one repo, and can keep a repo apart from global memories", async () => {
+    const fake = start();
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    const repoKey = "github.com/acme/api";
+    await fake.call("memory.save", { where: { directory: cwd }, scope: "repo", type: "howto", subject: "repo fact", body: "Repo only." });
+    await fake.call("memory.save", { where: { directory: cwd }, scope: "global", type: "preference", subject: "global fact", body: "Everywhere." });
+    expect((await fake.call("memory.repo-prefs.get", { repoKey })).prefs).toEqual({ enabled: true, includeGlobal: true, capture: "default" });
+    await fake.call("memory.repo-prefs.set", { repoKey, prefs: { enabled: false, includeGlobal: true, capture: "default" } });
+    const off = (await fake.create({ provider: "claude", cwd, systemPrompt: "Own.", mcpServers: other })).config;
+    expect(off.systemPrompt).toBe("Own.");
+    expect(Object.keys(off.mcpServers)).toEqual(["excalidraw"]);
+    expect((await fake.call("memory.preview", { directory: cwd })).off).toBe(true);
+    await fake.call("memory.repo-prefs.set", { repoKey, prefs: { enabled: true, includeGlobal: false, capture: "default" } });
+    const apart = (await fake.create({ provider: "claude", cwd })).config.systemPrompt;
+    expect(apart).toContain("repo fact");
+    expect(apart).not.toContain("global fact");
+  });
+
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
     const fake = start();
     const repo = { repoKey: "github.com/acme/api" };

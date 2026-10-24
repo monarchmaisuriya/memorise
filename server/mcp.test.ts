@@ -40,7 +40,7 @@ describe("memory MCP servers", () => {
   beforeEach(async () => {
     store = new MemoryStore(tempDir("memorise-"));
     tokens = new TokenAuthority(randomBytes(32));
-    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), expiryDays: async () => 60 }).listen(0);
+    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
     port = (http.address() as AddressInfo).port;
     clients = [];
   });
@@ -199,6 +199,20 @@ describe("memory MCP servers", () => {
     expect(read.text).toMatch(/turned off by the user/);
   });
 
+  it("keeps global memories from an agent whose repo is set apart from them", async () => {
+    await new Promise((resolve) => http.close(resolve));
+    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), expiryDays: async () => 60, includeGlobal: async (repoKey) => repoKey !== REPO }).listen(0);
+    port = (http.address() as AddressInfo).port;
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    const global = await store.create({ scope: "global", repoKey: null, type: "preference", subject: "docker global", body: "Docker everywhere.", supersedes: null, source, citations: [] });
+    const repo = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "docker repo", body: "Docker here.", supersedes: null, source, citations: [] });
+    const reader = await connect("read", bearer({ repoKey: REPO, cwd: "/tmp", provider: "claude" }));
+    const found = (await call(reader, "memory_search", { query: "docker" })).text;
+    expect(found).toContain(repo.id);
+    expect(found).not.toContain(global.id);
+    expect((await call(reader, "memory_read", { id: global.id })).isError).toBe(true);
+  });
+
   it("refuses the GET event stream", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp/read`, { headers: { Authorization: bearer({ repoKey: REPO, cwd: "/tmp", provider: "claude" }), Accept: "text/event-stream" } });
     expect(response.status).toBe(405);
@@ -209,7 +223,7 @@ describe("shutdown", () => {
   it("closes promptly while an agent's client is still connected", async () => {
     const tokens = new TokenAuthority(randomBytes(32));
     const root = tempDir("memorise-");
-    const http = await new MemoryMcp({ store: new MemoryStore(root), tokens, search: new SearchIndex(root), usage: new UsageLog(root), expiryDays: async () => 60 }).listen(0);
+    const http = await new MemoryMcp({ store: new MemoryStore(root), tokens, search: new SearchIndex(root), usage: new UsageLog(root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
     const port = (http.address() as AddressInfo).port;
     const client = new Client({ name: "test", version: "0" });
     const authorization = `Bearer ${tokens.mint({ repoKey: null, cwd: "/tmp", provider: "claude" })}`;

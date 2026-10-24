@@ -3,6 +3,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   approveProposalRpc,
   type BulkAction,
+  getRepoPrefsRpc,
   bulkMemoryRpc,
   deleteMemoryRpc,
   listMemoriesRpc,
@@ -14,12 +15,14 @@ import {
   type MemorySettings,
   moveMemoryRpc,
   pinMemoryRpc,
+  previewMemoryRpc,
   rejectProposalRpc,
   restoreMemoryRpc,
   retireMemoryRpc,
   revertMemoryRpc,
   saveMemoryRpc,
   searchMemoriesRpc,
+  setRepoPrefsRpc,
   tidyMemoryRpc,
   updateMemoryRpc,
   type Where,
@@ -32,11 +35,12 @@ import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
 import { supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
+import { RepoPrefs } from "./repo-prefs";
 import { SearchIndex } from "./search-index";
 import { assertNoSecret } from "./secrets";
 import { MemoryStore } from "./store";
 import { UsageLog, usageOf } from "./usage";
-import { isVisibleToAgents, orderForAgents, rankForAgent } from "./visibility";
+import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
 import { PathMatcher, workFiles } from "./work-files";
 import { isWorkerRequest } from "./workers";
 
@@ -51,6 +55,7 @@ interface Runtime {
   search: SearchIndex | null;
   usage: UsageLog;
   proposals: ProposalStore;
+  repoPrefs: RepoPrefs;
   capture: Capture;
   port: number;
   mcpProblem: string | null;
@@ -82,11 +87,20 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     }
     const usage = new UsageLog(root);
     const proposals = new ProposalStore(root);
-    const capture = new Capture({ root, store, proposals, usage, settings: currentSettings });
+    const repoPrefs = new RepoPrefs(root);
+    const capture = new Capture({ root, store, proposals, usage, repoPrefs, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
     const { mcpPort } = await currentSettings();
-    const mcp = new MemoryMcp({ store, tokens, search, searchProblem, usage, expiryDays: async () => (await currentSettings()).expiryDays });
-    const base = { root, store, tokens, search, usage, proposals, capture, port: mcpPort };
+    const mcp = new MemoryMcp({
+      store,
+      tokens,
+      search,
+      searchProblem,
+      usage,
+      expiryDays: async () => (await currentSettings()).expiryDays,
+      includeGlobal: async (repoKey) => (await repoPrefs.get(repoKey)).includeGlobal,
+    });
+    const base = { root, store, tokens, search, usage, proposals, repoPrefs, capture, port: mcpPort };
     try {
       const http = await mcp.listen(mcpPort);
       console.log(`[memorise] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
@@ -99,6 +113,34 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     }
   })();
   runtime.catch((error: unknown) => console.error(`[memorise] failed to start: ${String(error)}`));
+
+  // What a new agent in `cwd` gets, built the same way for the create hook and the preview. `off`
+  // when the repo has memory turned off.
+  async function prepareMemory(cwd: string, values: MemorySettings) {
+    const { store, repoPrefs, mcpProblem } = await runtime;
+    const problems: string[] = mcpProblem ? [mcpProblem] : [];
+    const repoKey = await readRepoKey(cwd).catch((error: unknown) => {
+      problems.push(`repo memory is unavailable for this session (${String(error)})`);
+      console.error(`[memorise] repo key for ${cwd} failed: ${String(error)}`);
+      return null;
+    });
+    const prefs = repoKey ? await repoPrefs.get(repoKey) : null;
+    if (prefs && !prefs.enabled) return { off: true as const, repoKey };
+    const changed = repoKey
+      ? await workFiles(cwd).catch((error: unknown) => {
+          console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
+          return [];
+        })
+      : [];
+    const paths = new PathMatcher(changed, PATH_MATCH_BUDGET_MS);
+    const reachable = (await store.list(repoKey)).filter((fact) => (prefs?.includeGlobal ?? true) || fact.scope === "repo");
+    const ranked = rankWithReasons(reachable.filter((fact) => isVisibleToAgents(fact, values.expiryDays)), paths);
+    if (paths.skipped) problems.push("ranking by changed files was cut short (time budget); some memories about those files may be listed lower");
+    const visible = ranked.map(({ fact }) => fact);
+    const notes = repoKey ? await checkCitations(cwd, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
+    const section = buildMemorySection({ repoKey, facts: visible, notes, maxLines: values.indexMaxLines, toolsAvailable: mcpProblem === null, problems });
+    return { off: false as const, repoKey, section, ranked };
+  }
 
   server.before("agent.create", async ({ request }, { paseo }) => {
     const { config } = request;
@@ -114,27 +156,13 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     try {
       const values = await currentSettings();
       if (!values.enabled) return { ...request, config: stripped };
-      const { root, store, tokens, usage, capture, port, mcpProblem } = await runtime;
+      const { root, tokens, usage, capture, port, mcpProblem } = await runtime;
       capture.remember(paseo);
       // The plugin's own capture and tidy workers get no memory and no memory tools.
       if (isWorkerRequest(root, config.cwd, request.env)) return { ...request, config: stripped };
-      const problems: string[] = mcpProblem ? [mcpProblem] : [];
-      const repoKey = await readRepoKey(config.cwd).catch((error: unknown) => {
-        problems.push(`repo memory is unavailable for this session (${String(error)})`);
-        console.error(`[memorise] repo key for ${config.cwd} failed: ${String(error)}`);
-        return null;
-      });
-      const changed = repoKey
-        ? await workFiles(config.cwd).catch((error: unknown) => {
-            console.error(`[memorise] changed files for ${config.cwd} unavailable: ${String(error)}`);
-            return [];
-          })
-        : [];
-      const paths = new PathMatcher(changed, PATH_MATCH_BUDGET_MS);
-      const visible = rankForAgent((await store.list(repoKey)).filter((fact) => isVisibleToAgents(fact, values.expiryDays)), paths);
-      if (paths.skipped) problems.push("ranking by changed files was cut short (time budget); some memories about those files may be listed lower");
-      const notes = repoKey ? await checkCitations(config.cwd, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
-      const section = buildMemorySection({ repoKey, facts: visible, notes, maxLines: values.indexMaxLines, toolsAvailable: mcpProblem === null, problems });
+      const prepared = await prepareMemory(config.cwd, values);
+      if (prepared.off) return { ...request, config: stripped };
+      const { repoKey, section } = prepared;
       await usage.record("shown", section.shownIds).catch((error: unknown) => console.error(`[memorise] usage log write failed: ${String(error)}`));
       const token = tokens.mint({ repoKey, cwd: config.cwd, provider });
       return {
@@ -226,6 +254,20 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     await store.delete(id, repoKey);
     return { deleted: true as const };
   });
+
+  server.handle(previewMemoryRpc, async ({ directory }) => {
+    const prepared = await prepareMemory(directory, await currentSettings());
+    if (prepared.off) return { repoKey: prepared.repoKey, off: true, text: "", bytes: 0, listed: [] };
+    const shown = new Set(prepared.section.shownIds);
+    const listed = prepared.ranked
+      .filter(({ fact }) => shown.has(fact.id))
+      .map(({ fact, reason }) => ({ id: fact.id, subject: fact.subject, reason, titleOnly: fact.activation === "title" && !fact.pinned }));
+    return { repoKey: prepared.repoKey, off: false, text: prepared.section.text, bytes: Buffer.byteLength(prepared.section.text), listed };
+  });
+
+  server.handle(getRepoPrefsRpc, async ({ repoKey }) => ({ prefs: await (await runtime).repoPrefs.get(repoKey) }));
+
+  server.handle(setRepoPrefsRpc, async ({ repoKey, prefs }) => ({ prefs: await (await runtime).repoPrefs.set(repoKey, prefs) }));
 
   server.handle(listReposRpc, async () => ({ repos: await (await runtime).store.summaries() }));
 

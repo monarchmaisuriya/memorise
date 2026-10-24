@@ -9,7 +9,7 @@ import { git } from "./git";
 import type { AgentScope, TokenAuthority } from "./mcp-auth";
 import { assertNoSecret } from "./secrets";
 import type { SearchIndex } from "./search-index";
-import type { MemoryStore } from "./store";
+import { FactNotFoundError, type MemoryStore } from "./store";
 import type { UsageLog } from "./usage";
 import { isVisibleToAgents, orderForAgents } from "./visibility";
 import { factMatchesFiles } from "./work-files";
@@ -32,6 +32,8 @@ export interface MemoryMcpOptions {
   searchProblem?: string;
   usage: UsageLog;
   expiryDays(): Promise<number>;
+  // False when the agent's repo is set apart from global memories.
+  includeGlobal(repoKey: string): Promise<boolean>;
 }
 
 export function mcpServerEntries(port: number, token: string) {
@@ -77,6 +79,14 @@ export class MemoryMcp {
 
   constructor(private readonly options: MemoryMcpOptions) {
     this.auditPath = join(options.store.root, "audit.jsonl");
+  }
+
+  // The facts an agent's read tools can reach: its repo's, plus global ones unless the repo is set
+  // apart from them.
+  private async factsFor(scope: AgentScope): Promise<FactListItem[]> {
+    const facts = await this.options.store.list(scope.repoKey);
+    if (scope.repoKey === null || (await this.options.includeGlobal(scope.repoKey))) return facts;
+    return facts.filter((fact) => fact.scope === "repo");
   }
 
   private async audit(scope: AgentScope, tool: string, id: string | null, outcome: string): Promise<void> {
@@ -152,7 +162,7 @@ export class MemoryMcp {
       this.tool(scope, "memory_search", async ({ query, paths, limit }: { query?: string; paths?: string[]; limit?: number }) => {
         if (!query?.trim() && !paths?.length) throw new Error("Give a query, paths, or both.");
         const expiryDays = await this.options.expiryDays();
-        const all = await store.list(scope.repoKey);
+        const all = await this.factsFor(scope);
         let facts = orderForAgents(all.filter((fact) => isVisibleToAgents(fact, expiryDays)));
         if (paths?.length) facts = facts.filter((fact) => factMatchesFiles(fact, paths));
         const max = limit ?? 8;
@@ -176,7 +186,8 @@ export class MemoryMcp {
       "memory_read",
       { description: "Read one memory in full by its id.", inputSchema: { id: factIdSchema } },
       this.tool(scope, "memory_read", async ({ id }: { id: string }) => {
-        const fact = await store.get(id, scope.repoKey);
+        const fact = (await this.factsFor(scope)).find((candidate) => candidate.id === factIdSchema.parse(id));
+        if (!fact) throw new FactNotFoundError(id);
         if (!fact.enabled) throw new Error(`Memory ${id} is turned off by the user`);
         if (fact.status === "active" && !fact.superseded) await store.markUsed(id, scope.repoKey);
         await this.options.usage.record("read", [id]);

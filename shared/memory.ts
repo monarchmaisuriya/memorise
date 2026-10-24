@@ -234,6 +234,42 @@ export const bulkMemoryRpc = defineRpc({
   output: z.object({ results: z.array(z.object({ id: factIdSchema, ok: z.boolean(), error: z.string().optional() })) }),
 });
 
+// Per-repo preferences, shared by every worktree of the repo. enabled false: new agents in the repo
+// get no memory and no memory tools. includeGlobal false: the repo's agents see no global memories.
+// capture: "default" follows the host setting; "on" or "off" overrides it for this repo.
+export const repoPrefsSchema = z.object({
+  enabled: z.boolean().default(true),
+  includeGlobal: z.boolean().default(true),
+  capture: z.enum(["default", "on", "off"]).default("default"),
+});
+export type RepoPrefsValue = z.infer<typeof repoPrefsSchema>;
+
+export const getRepoPrefsRpc = defineRpc({
+  name: "memory.repo-prefs.get",
+  input: z.object({ repoKey: repoKeySchema }),
+  output: z.object({ prefs: repoPrefsSchema }),
+});
+
+export const setRepoPrefsRpc = defineRpc({
+  name: "memory.repo-prefs.set",
+  input: z.object({ repoKey: repoKeySchema, prefs: repoPrefsSchema }),
+  output: z.object({ prefs: repoPrefsSchema }),
+});
+
+// What a new agent in this workspace would get now, built by the same code as the create hook.
+export const listReasonSchema = z.enum(["pinned", "files", "global", "repo"]);
+export const previewMemoryRpc = defineRpc({
+  name: "memory.preview",
+  input: directoryInput,
+  output: z.object({
+    repoKey: repoKeySchema.nullable(),
+    off: z.boolean(),
+    text: z.string(),
+    bytes: z.number(),
+    listed: z.array(z.object({ id: factIdSchema, subject: z.string(), reason: listReasonSchema, titleOnly: z.boolean() })),
+  }),
+});
+
 // A proposal is a change to memory that waits for the user: a new fact from a captured session, or a
 // merge, replacement, or retirement suggested by a tidy pass. Agents never see proposals.
 export const proposalKindSchema = z.enum(["new", "replace", "merge", "retire"]);

@@ -38,10 +38,14 @@ export function listReason(fact: FactListItem, paths: PathMatcher): ListReason |
 // Order for a new agent's index: pinned facts, then facts about files this worktree is changing,
 // then global facts (the user's preferences), then this repo's; most recently used first in each.
 // Each fact's reason is worked out once, before sorting, never inside the comparison.
-export function rankForAgent(facts: readonly FactListItem[], paths: PathMatcher): FactListItem[] {
+export function rankWithReasons(facts: readonly FactListItem[], paths: PathMatcher): { fact: FactListItem; reason: ListReason }[] {
   const keyed = facts.flatMap((fact) => {
     const reason = listReason(fact, paths);
-    return reason ? [{ fact, tier: TIER[reason], used: Date.parse(fact.lastUsed) }] : [];
+    return reason ? [{ fact, reason, tier: TIER[reason], used: Date.parse(fact.lastUsed) }] : [];
   });
-  return keyed.sort((a, b) => a.tier - b.tier || b.used - a.used).map(({ fact }) => fact);
+  return keyed.sort((a, b) => a.tier - b.tier || b.used - a.used).map(({ fact, reason }) => ({ fact, reason }));
+}
+
+export function rankForAgent(facts: readonly FactListItem[], paths: PathMatcher): FactListItem[] {
+  return rankWithReasons(facts, paths).map(({ fact }) => fact);
 }
