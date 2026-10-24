@@ -4,6 +4,13 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-24
+
+### Fixed
+
+- The manager lists every repository with an open Paseo workspace, and every repository with proposals waiting, beside those that have memories, so "Create from project" can be run on a repository before it has any memories.
+- "Tidy all repos" covers only repositories with at least 2 memories, which is what tidy needs.
+
 ## [0.4.0] - 2026-10-24
 
 ### Added
@@ -80,7 +87,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.1
 [0.4.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.0
 [0.3.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.3.0
 [0.2.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.1
