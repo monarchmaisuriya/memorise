@@ -4,5 +4,6 @@
   "description": "Durable facts shared by Claude, Codex, and OpenCode agents across workspaces.",
   "requirements": {
     "paseo": ">=0.12.0 <0.14.0"
-  }
+  },
+  "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]]
 }
