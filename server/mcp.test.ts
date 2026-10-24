@@ -1,14 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { checkCitations } from "./citations";
 import { type AgentScope, loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
+import { ProjectKeys } from "./project-keys";
 import { SearchIndex } from "./search-index";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -36,11 +38,13 @@ describe("memory MCP servers", () => {
   let http: Server;
   let port: number;
   let clients: Client[];
+  let keys: ProjectKeys;
 
   beforeEach(async () => {
     store = new MemoryStore(tempDir("memorise-"));
     tokens = new TokenAuthority(randomBytes(32));
-    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
+    keys = new ProjectKeys(store.root);
+    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), keys, expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
     port = (http.address() as AddressInfo).port;
     clients = [];
   });
@@ -153,6 +157,38 @@ describe("memory MCP servers", () => {
     expect((await store.list(REPO)).find((fact) => !fact.superseded)?.citations).toEqual([{ path: "scripts/test-int.sh", commit: later }]);
   });
 
+  it("pins a folder's citations to each file's content, and marks the memory when a cited file changes or goes", async () => {
+    const plain = tempDir("mcp-plain-");
+    await mkdir(join(plain, "notes"));
+    await writeFile(join(plain, "notes", "plan.md"), "Day one.\n");
+    await symlink(join(plain, "notes", "plan.md"), join(plain, "link.md"));
+    const project = await keys.resolve(plain);
+    const writer = await connect("write", bearer({ repoKey: project.key, cwd: plain, provider: "claude" }));
+    expect((await call(writer, "memory_write", { type: "howto", subject: "x", fact: "y", citations: [{ path: "link.md" }] })).text).toMatch(/not a regular file/);
+    expect((await call(writer, "memory_write", { type: "howto", subject: "x", fact: "y", citations: [{ path: "notes/missing.md" }] })).text).toMatch(/does not exist/);
+    expect((await call(writer, "memory_write", { type: "howto", subject: "plan", fact: "The plan is in notes.", citations: [{ path: "./notes/plan.md", lines: "1" }] })).isError).toBe(false);
+    const [fact] = await store.list(project.key);
+    expect(fact.citations).toEqual([{ path: "notes/plan.md", lines: "1", hash: expect.stringMatching(/^[0-9a-f]{16}$/) }]);
+    expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map());
+    await writeFile(join(plain, "notes", "plan.md"), "Day two.\n");
+    expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md changed since it was cited"]]));
+    await rm(join(plain, "notes", "plan.md"));
+    expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md is missing"]]));
+  });
+
+  it("refuses to cite files in a folder that belongs to another project than when the agent started", async () => {
+    const outer = tempDir("mcp-outer-");
+    const inner = join(outer, "inner");
+    await mkdir(inner);
+    await writeFile(join(inner, "a.md"), "A\n");
+    await keys.markRoot(outer);
+    const started = await keys.resolve(inner);
+    const writer = await connect("write", bearer({ repoKey: started.key, cwd: inner, provider: "claude" }));
+    expect((await call(writer, "memory_write", { type: "howto", subject: "a", fact: "A file.", citations: [{ path: "inner/a.md" }] })).isError).toBe(false);
+    await keys.markRoot(inner);
+    expect((await call(writer, "memory_write", { type: "howto", subject: "b", fact: "B file.", citations: [{ path: "a.md" }] })).text).toMatch(/now belongs to/);
+  });
+
   it("counts a search hit as use", async () => {
     const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const fact = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "docker", body: "Tests need DOCKER_HOST.", supersedes: null, source: { by: "agent", provider: "codex", branch: null, commit: null }, citations: [] });
@@ -201,7 +237,7 @@ describe("memory MCP servers", () => {
 
   it("keeps global memories from an agent whose repo is set apart from them", async () => {
     await new Promise((resolve) => http.close(resolve));
-    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), expiryDays: async () => 60, includeGlobal: async (repoKey) => repoKey !== REPO }).listen(0);
+    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), keys: new ProjectKeys(store.root), expiryDays: async () => 60, includeGlobal: async (repoKey) => repoKey !== REPO }).listen(0);
     port = (http.address() as AddressInfo).port;
     const source = { by: "user" as const, provider: null, branch: null, commit: null };
     const global = await store.create({ scope: "global", repoKey: null, type: "preference", subject: "docker global", body: "Docker everywhere.", supersedes: null, source, citations: [] });
@@ -223,7 +259,7 @@ describe("shutdown", () => {
   it("closes promptly while an agent's client is still connected", async () => {
     const tokens = new TokenAuthority(randomBytes(32));
     const root = tempDir("memorise-");
-    const http = await new MemoryMcp({ store: new MemoryStore(root), tokens, search: new SearchIndex(root), usage: new UsageLog(root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
+    const http = await new MemoryMcp({ store: new MemoryStore(root), tokens, search: new SearchIndex(root), usage: new UsageLog(root), keys: new ProjectKeys(root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
     const port = (http.address() as AddressInfo).port;
     const client = new Client({ name: "test", version: "0" });
     const authorization = `Bearer ${tokens.mint({ repoKey: null, cwd: "/tmp", provider: "claude" })}`;

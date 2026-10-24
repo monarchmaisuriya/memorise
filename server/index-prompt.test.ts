@@ -39,13 +39,6 @@ function fact(overrides: Partial<FactListItem> = {}): FactListItem {
 const base = { repoKey: "github.com/acme/api", notes: new Map<string, string>(), maxLines: 150, toolsAvailable: true, problems: [] };
 
 describe("memory section", () => {
-  it("tells agents in a folder outside git to name files by path, not to cite them", () => {
-    const folder = buildMemorySection({ ...base, repoKey: "folder/notes-0123456789ab", facts: [] }).text;
-    expect(folder).toContain("no citations (they need git)");
-    expect(folder).not.toContain("cite the files it is about");
-    expect(buildMemorySection({ ...base, facts: [] }).text).toContain("cite the files it is about");
-  });
-
   it("is added once even when a parent prompt already carries one", () => {
     const parent = withMemorySection("Be brief.", buildMemorySection({ ...base, facts: [fact()] }).text);
     const child = withMemorySection(parent, buildMemorySection({ ...base, facts: [fact()] }).text);
@@ -119,7 +112,7 @@ describe("checkCitations", () => {
     const changed = fact({ citations: [{ path: "a.ts", commit: sha }] });
     const unchanged = fact({ citations: [{ path: "b.ts", commit: sha }] });
     const unknown = fact({ citations: [{ path: "b.ts", commit: "deadbeef" }] });
-    const notes = await checkCitations(cwd, [changed, unchanged, unknown], 2_000);
+    const notes = await checkCitations({ cwd, root: cwd }, [changed, unchanged, unknown], 2_000);
     expect(notes.get(changed.id)).toBe(`a.ts changed since ${sha}`);
     expect(notes.has(unchanged.id)).toBe(false);
     expect(notes.get(unknown.id)).toBe("commit deadbeef is not in this checkout");
@@ -127,7 +120,7 @@ describe("checkCitations", () => {
 
   it("reports facts it had no time to check instead of passing them", async () => {
     const item = fact({ citations: [{ path: "a.ts", commit: "abc1234" }] });
-    expect((await checkCitations("/tmp", [item], 0)).get(item.id)).toBe("citations not checked (time budget)");
+    expect((await checkCitations({ cwd: "/tmp", root: "/tmp" }, [item], 0)).get(item.id)).toBe("citations not checked (time budget)");
   });
 });
 

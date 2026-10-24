@@ -41,7 +41,7 @@ import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
 import type { PaseoApi } from "./paseo-types";
 import { supportedProvider } from "./providers";
-import { readRepoKey } from "./repo-key";
+import { ProjectKeys } from "./project-keys";
 import { RepoPrefs } from "./repo-prefs";
 import { SearchIndex } from "./search-index";
 import { assertNoSecret } from "./secrets";
@@ -49,8 +49,8 @@ import { MemoryStore } from "./store";
 import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
-import { PathMatcher, workFiles } from "./work-files";
-import { openRepoCheckouts } from "./workspaces";
+import { PathMatcher, recentFiles, workFiles } from "./work-files";
+import { markProjectRoots, openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
 
 const CITATION_BUDGET_MS = 1_000;
@@ -65,6 +65,7 @@ interface Runtime {
   usage: UsageLog;
   proposals: ProposalStore;
   repoPrefs: RepoPrefs;
+  keys: ProjectKeys;
   capture: Capture;
   port: number;
   mcpProblem: string | null;
@@ -97,7 +98,9 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const usage = new UsageLog(root);
     const proposals = new ProposalStore(root);
     const repoPrefs = new RepoPrefs(root);
-    const capture = new Capture({ root, store, proposals, usage, repoPrefs, settings: currentSettings });
+    // A folder with memories or proposals of its own stays its own project under a later project root.
+    const keys = new ProjectKeys(root, async (key) => (await store.list(key)).some((fact) => fact.scope === "repo") || (await proposals.list(key)).length > 0);
+    const capture = new Capture({ root, store, proposals, usage, repoPrefs, keys, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
     capture.startProjectScans();
     const { mcpPort } = await currentSettings();
@@ -107,10 +110,11 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       search,
       searchProblem,
       usage,
+      keys,
       expiryDays: async () => (await currentSettings()).expiryDays,
       includeGlobal: async (repoKey) => (await repoPrefs.get(repoKey)).includeGlobal,
     });
-    const base = { root, store, tokens, search, usage, proposals, repoPrefs, capture, port: mcpPort };
+    const base = { root, store, tokens, search, usage, proposals, repoPrefs, keys, capture, port: mcpPort };
     try {
       const http = await mcp.listen(mcpPort);
       console.log(`[memorise] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
@@ -127,30 +131,50 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // What a new agent in `cwd` gets, built the same way for the create hook and the preview. `off`
   // when the repo has memory turned off.
   async function prepareMemory(cwd: string, values: MemorySettings) {
-    const { store, repoPrefs, mcpProblem } = await runtime;
+    const { store, repoPrefs, keys, mcpProblem } = await runtime;
     const problems: string[] = mcpProblem ? [mcpProblem] : [];
-    const repoKey = await readRepoKey(cwd).catch((error: unknown) => {
+    const project = await keys.resolve(cwd).catch((error: unknown) => {
       problems.push(`repo memory is unavailable for this session (${String(error)})`);
       console.error(`[memorise] repo key for ${cwd} failed: ${String(error)}`);
       return null;
     });
+    const repoKey = project?.key ?? null;
     const prefs = repoKey ? await repoPrefs.get(repoKey) : null;
     if (prefs && !prefs.enabled) return { off: true as const, repoKey };
-    // A folder outside git has no history, so no files are known to be changed.
-    const changed = repoKey && !isFolderKey(repoKey)
-      ? await workFiles(cwd).catch((error: unknown) => {
-          console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
-          return [];
-        })
-      : [];
+    // In a repo, the files this checkout changed; in a folder outside git, which has no history, the
+    // files changed in the last week. Both are relative to the project root, like a memory's paths.
+    let changed: string[] = [];
+    if (project && isFolderKey(project.key)) {
+      const recent = await recentFiles(project.root);
+      if (recent.cutShort) problems.push("the list of recently changed files was cut short (size or time limit); some memories about them may be listed lower");
+      changed = recent.files;
+    } else if (project) {
+      changed = await workFiles(cwd).catch((error: unknown) => {
+        console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
+        return [];
+      });
+    }
     const paths = new PathMatcher(changed, PATH_MATCH_BUDGET_MS);
     const reachable = (await store.list(repoKey)).filter((fact) => (prefs?.includeGlobal ?? true) || fact.scope === "repo");
     const ranked = rankWithReasons(reachable.filter((fact) => isVisibleToAgents(fact, values.expiryDays)), paths);
     if (paths.skipped) problems.push("ranking by changed files was cut short (time budget); some memories about those files may be listed lower");
     const visible = ranked.map(({ fact }) => fact);
-    const notes = repoKey ? await checkCitations(cwd, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
+    const notes = project ? await checkCitations({ cwd, root: project.root }, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
     const section = buildMemorySection({ repoKey, facts: visible, notes, maxLines: values.indexMaxLines, toolsAvailable: mcpProblem === null, problems });
     return { off: false as const, repoKey, section, ranked };
+  }
+
+  // Project roots are recorded from Paseo's workspaces before the first agent's memory is prepared,
+  // so an agent in a subfolder of a project outside git gets the project's memory from the start.
+  let rootsKnown: Promise<void> | null = null;
+  function projectRootsKnown(paseo: PaseoApi): Promise<void> {
+    rootsKnown ??= runtime
+      .then(({ root, keys }) => markProjectRoots(paseo, root, keys))
+      .catch((error: unknown) => {
+        rootsKnown = null;
+        console.error(`[memorise] project roots could not be read from Paseo: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    return rootsKnown;
   }
 
   server.before("agent.create", async ({ request }, { paseo }) => {
@@ -171,6 +195,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       capture.remember(paseo);
       // The plugin's own capture and tidy workers get no memory and no memory tools.
       if (isWorkerRequest(root, config.cwd, request.env)) return { ...request, config: stripped };
+      await projectRootsKnown(paseo);
       const prepared = await prepareMemory(config.cwd, values);
       if (prepared.off) return { ...request, config: stripped };
       const { repoKey, section } = prepared;
@@ -210,10 +235,12 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // The hook returns at once: a scan takes longer than Paseo waits for a hook. Workspaces of the
   // plugin's own workers are never scanned.
   server.on("workspace.created", async ({ workspace }, { paseo }) => {
-    const { capture } = await runtime;
+    const { capture, keys, root } = await runtime;
     capture.remember(paseo);
     if (capture.isWorker("", workspace.cwd)) return;
-    void readRepoKey(workspace.cwd)
+    // The new workspace's project may be a new project root: folders below it share its memory.
+    void markProjectRoots(paseo, root, keys)
+      .then(() => keys.keyOf(workspace.cwd))
       .then((repoKey) => capture.scanIfDue(repoKey, workspace.cwd))
       .catch((error: unknown) => console.error(`[memorise] automatic project scan of ${workspace.cwd}: ${error instanceof Error ? error.message : String(error)}`));
   });
@@ -229,7 +256,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   });
 
   // The panel names a workspace folder; the manager names a repo key, or null for global only.
-  const repoKeyOf = (where: Where): Promise<string | null> => ("directory" in where ? readRepoKey(where.directory) : Promise.resolve(where.repoKey));
+  const repoKeyOf = async (where: Where): Promise<string | null> => ("directory" in where ? (await runtime).keys.keyOf(where.directory) : where.repoKey);
 
   server.handle(listMemoriesRpc, async ({ where }) => {
     const [{ store, usage }, repoKey, values] = await Promise.all([runtime, repoKeyOf(where), currentSettings()]);
@@ -326,12 +353,14 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // Every repo the manager can work on: those with memories (with counts), those with an open Paseo
   // workspace, and those with proposals waiting. Global comes first, then repos by key.
   server.handle(listReposRpc, async (_input, { paseo }) => {
-    const { store, proposals, root } = await runtime;
-    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo, root), proposals.summary()]);
+    const { store, proposals, root, keys } = await runtime;
+    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo, root, keys), proposals.summary()]);
     const known = new Set(withMemories.map((repo) => repo.repoKey));
     const others = [...new Set([...open.keys(), ...waiting.map((repo) => repo.repoKey)])].filter((repoKey) => !known.has(repoKey));
     const repos = [...withMemories, ...others.map((repoKey) => ({ repoKey, active: 0, retired: 0, lastModified: null }))];
-    return { repos: repos.sort((a, b) => (a.repoKey === null ? -1 : b.repoKey === null ? 1 : a.repoKey.localeCompare(b.repoKey))) };
+    // A folder project is shown by its folder's current name, which a rename changes and its key does not.
+    const labelled = await Promise.all(repos.map(async (repo) => ({ ...repo, label: repo.repoKey && isFolderKey(repo.repoKey) ? ((await keys.label(repo.repoKey))?.name ?? null) : null })));
+    return { repos: labelled.sort((a, b) => (a.repoKey === null ? -1 : b.repoKey === null ? 1 : a.repoKey.localeCompare(b.repoKey))) };
   });
 
   server.handle(searchMemoriesRpc, async ({ where, query }) => {
@@ -415,10 +444,11 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // workspace that belongs to the repo.
   async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
     if ("directory" in where) {
-      return { repoKey: await readRepoKey(where.directory), folder: where.directory };
+      return { repoKey: await (await runtime).keys.keyOf(where.directory), folder: where.directory };
     }
     if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
-    const folder = (await openRepoCheckouts(paseo, (await runtime).root)).get(where.repoKey);
+    const { root, keys } = await runtime;
+    const folder = (await openRepoCheckouts(paseo, root, keys)).get(where.repoKey);
     if (folder) return { repoKey: where.repoKey, folder };
     throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
   }

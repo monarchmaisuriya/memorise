@@ -7,9 +7,9 @@ import { checkCitations } from "./citations";
 import { buildCapturePrompt, buildProjectPrompt, buildTidyPrompt, CAPTURE_OUTPUT_SCHEMA, parseCandidates, parseProjectReply, parseTidyActions, projectOutputSchema, type ScanMode, TIDY_OUTPUT_SCHEMA } from "./extractor";
 import type { PaseoApi } from "./paseo-types";
 import { type ProjectFile, readProjectFiles } from "./project-files";
+import type { ProjectKeys } from "./project-keys";
 import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
-import { readRepoKey } from "./repo-key";
 import type { RepoPrefs } from "./repo-prefs";
 import type { MemoryStore } from "./store";
 import { sliceTranscript } from "./transcript";
@@ -50,6 +50,7 @@ export interface CaptureDeps {
   proposals: ProposalStore;
   usage: UsageLog;
   repoPrefs: RepoPrefs;
+  keys: ProjectKeys;
   settings(): Promise<MemorySettings>;
 }
 
@@ -194,7 +195,7 @@ export class Capture {
     this.remember(paseo);
     if (this.isWorker(agent.id, agent.cwd) || !supportedProvider(agent.provider)) return;
     const values = await this.deps.settings();
-    const repoKey = await readRepoKey(agent.cwd).catch(() => null);
+    const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
     if (!repoKey || !(await this.captureOn(values, repoKey))) return;
     clearTimeout(this.timers.get(agent.id));
     this.timers.set(
@@ -265,7 +266,9 @@ export class Capture {
       const paseo = this.paseo;
       if (!paseo) throw new Error("The plugin has not seen Paseo yet; open an agent and try again");
       const values = await this.deps.settings();
-      const files = await readProjectFiles(cwd);
+      const project = await this.deps.keys.resolve(cwd);
+      if (project.key !== repoKey) throw new Error(`${cwd} belongs to ${project.key}, not ${repoKey}`);
+      const files = await readProjectFiles(project.root);
       if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
       await this.requireRun(`project scan of ${repoKey}`, values.captureMaxPerDay);
       const startedAt = new Date().toISOString();
@@ -277,7 +280,8 @@ export class Capture {
           const entry = state.scans[repoKey];
           if (entry?.startedAt === startedAt) entry[outcome] = new Date().toISOString();
         });
-      const run = this.track(repoKey, "scan", this.runScan(paseo, repoKey, mode, files, values), ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`).then(
+      // The outcome is saved before the inbox is told, so the two never disagree.
+      const recorded = this.runScan(paseo, repoKey, mode, files, values).then(
         async (result) => {
           await finish("okAt");
           return result;
@@ -287,6 +291,7 @@ export class Capture {
           throw error;
         },
       );
+      const run = this.track(repoKey, "scan", recorded, ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`);
       return { done: run.finally(() => this.scanning.delete(repoKey)) };
     } catch (error) {
       this.scanning.delete(repoKey);
@@ -341,7 +346,7 @@ export class Capture {
       // A model id belongs to one provider, so it applies only when one provider reads every session.
       const model = values.captureProvider === "session" ? "" : values.captureModel;
       if (!provider) return 0;
-      const repoKey = await readRepoKey(agent.cwd).catch(() => null);
+      const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
       // Captured memories belong to a repo; global memories come only from the user.
       if (!repoKey || !(await this.captureOn(values, repoKey))) return 0;
       const previous = (await this.readState()).agents[agent.id];
@@ -442,7 +447,9 @@ export class Capture {
   }
 
   private async runTidy(paseo: PaseoApi, repoKey: string, cwd: string | null, facts: FactListItem[], values: MemorySettings): Promise<number> {
-    const notes = cwd ? await checkCitations(cwd, facts, 2_000) : new Map<string, string>();
+    // Citations are checked only against a checkout of this same project.
+    const project = cwd ? await this.deps.keys.resolve(cwd).catch(() => null) : null;
+    const notes = cwd && project?.key === repoKey ? await checkCitations({ cwd, root: project.root }, facts, 2_000) : new Map<string, string>();
     const counts = await this.deps.usage.counts();
     const listed = facts.slice(0, 200).map((fact) => {
       const usage = usageOf(counts, fact.id);
@@ -537,7 +544,7 @@ export class Capture {
     const paseo = this.paseo;
     if (!paseo || (await this.deps.settings()).projectAutoScan === "off") return [];
     const scanned: string[] = [];
-    for (const [repoKey, folder] of await openRepoCheckouts(paseo, this.deps.root)) {
+    for (const [repoKey, folder] of await openRepoCheckouts(paseo, this.deps.root, this.deps.keys)) {
       if (await this.scanIfDue(repoKey, folder)) scanned.push(repoKey);
     }
     return scanned;

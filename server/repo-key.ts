@@ -40,8 +40,9 @@ export function repoKeyFromCommonDir(commonDir: string): string {
 const FOLDER_PREFIX = "folder/";
 const FOLDER_NAME_MAX = 40;
 
-// A folder outside git is one project: its key comes from its real path, and carries the folder's
-// name so the manager can show which folder it is. Moving the folder gives it a new key.
+// The key a folder outside git gets when it is first seen: from its real path at that time, with the
+// folder's name so the manager can show which folder it is. server/project-keys.ts keeps the key
+// when the folder is later renamed or moved.
 export function folderKey(realPath: string): string {
   const name = basename(realPath).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "").slice(0, FOLDER_NAME_MAX);
   return `${FOLDER_PREFIX}${name || (realPath === "/" ? "root" : "folder")}-${createHash("sha256").update(realPath).digest("hex").slice(0, 12)}`;
@@ -51,32 +52,29 @@ function isOutsideRepo(error: unknown): boolean {
   return error instanceof GitError && error.stderr.includes("not a git repository");
 }
 
-// The folder a key names: the repo's top level, or the folder itself when it is not in git. Any other
-// git failure is thrown, so a scan never reads a subfolder under the repo's key.
-export async function projectRoot(cwd: string): Promise<string> {
-  try {
-    return await realpath(await git(cwd, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS));
-  } catch (error) {
-    if (isOutsideRepo(error)) return realpath(cwd);
-    throw error;
-  }
-}
-
-// The key of the repo `cwd` is in, or of the folder itself when it is not in git.
-export async function readRepoKey(cwd: string): Promise<string> {
+// The git repo `cwd` is in: its key and its top level, or null when `cwd` is not in git. Any other git
+// failure is thrown, so a folder in a repo is never taken for a folder outside git.
+export async function readGitRepo(cwd: string): Promise<{ key: string; top: string } | null> {
   try {
     const remote = await git(cwd, ["config", "--get", "remote.origin.url"], GIT_TIMEOUT_MS).catch((error: unknown) => {
       // `git config --get` exits 1 when the key is absent: a repo without an origin.
       if (error instanceof GitError && error.exitCode === 1) return "";
       throw error;
     });
+    // Absolute and symlink-free, so /var and /private/var on macOS give one key and one top level. A
+    // bare repo or a folder inside .git has no work tree; its own folder stands in for one.
+    const top = await realpath(
+      await git(cwd, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS).catch((error: unknown) => {
+        if (error instanceof GitError && error.stderr.includes("must be run in a work tree")) return cwd;
+        throw error;
+      }),
+    );
     const fromRemote = remote === "" ? null : repoKeyFromRemote(remote);
-    if (fromRemote) return fromRemote;
-    // Absolute and symlink-free, so /var and /private/var on macOS give one key.
+    if (fromRemote) return { key: fromRemote, top };
     const commonDir = await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], GIT_TIMEOUT_MS);
-    return repoKeyFromCommonDir(await realpath(commonDir));
+    return { key: repoKeyFromCommonDir(await realpath(commonDir)), top };
   } catch (error) {
-    if (isOutsideRepo(error)) return folderKey(await realpath(cwd));
+    if (isOutsideRepo(error)) return null;
     throw error;
   }
 }

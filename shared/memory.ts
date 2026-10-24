@@ -49,8 +49,10 @@ export const citationSchema = z.object({
     .max(300)
     .refine((path) => !path.startsWith("/") && !path.split("/").includes(".."), "Cite a path relative to the repo root, without '..'"),
   lines: z.string().regex(/^\d+(-\d+)?$/, "Expected lines like 12 or 12-18").optional(),
-  commit: z.string().regex(/^[0-9a-f]{7,40}$/, "Expected a git commit sha"),
-});
+  // In a repo, the commit the file was cited at; in a folder outside git, the file's content hash.
+  commit: z.string().regex(/^[0-9a-f]{7,40}$/, "Expected a git commit sha").optional(),
+  hash: z.string().regex(/^[0-9a-f]{16}$/, "Expected a 16-character content hash").optional(),
+}).refine((citation) => (citation.commit === undefined) !== (citation.hash === undefined), "A citation is pinned to a git commit or to a file's content hash, exactly one");
 export type Citation = z.infer<typeof citationSchema>;
 
 export const MAX_PATH_GLOBS = 10;
@@ -201,7 +203,8 @@ export const listReposRpc = defineRpc({
   name: "memory.repos",
   input: z.object({}),
   output: z.object({
-    repos: z.array(z.object({ repoKey: repoKeySchema.nullable(), active: z.number(), retired: z.number(), lastModified: z.string().nullable() })),
+    // label: a folder project's current folder name; null for global and git repos.
+    repos: z.array(z.object({ repoKey: repoKeySchema.nullable(), active: z.number(), retired: z.number(), lastModified: z.string().nullable(), label: z.string().nullable().default(null) })),
   }),
 });
 

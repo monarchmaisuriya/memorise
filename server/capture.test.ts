@@ -9,7 +9,7 @@ import { Capture } from "./capture";
 import { buildCapturePrompt, parseCandidates, parseTidyActions } from "./extractor";
 import type { AgentTimelineItem, PaseoApi } from "./paseo-types";
 import { ProposalStore, proposalHash } from "./proposals";
-import { readRepoKey } from "./repo-key";
+import { ProjectKeys } from "./project-keys";
 import { RepoPrefs } from "./repo-prefs";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -97,6 +97,7 @@ describe("capture", () => {
   let values: MemorySettings;
   let capture: Capture;
   let repoPrefs: RepoPrefs;
+  let keys: ProjectKeys;
   let cwd: string;
   let agent: PluginHookAgent;
 
@@ -106,7 +107,8 @@ describe("capture", () => {
     proposals = new ProposalStore(root);
     values = { ...memorySettings.schema.parse({}), captureEnabled: true, captureIdleMinutes: 5 };
     repoPrefs = new RepoPrefs(root);
-    capture = new Capture({ root, store, proposals, usage: new UsageLog(root), repoPrefs, settings: async () => values });
+    keys = new ProjectKeys(root);
+    capture = new Capture({ root, store, proposals, usage: new UsageLog(root), repoPrefs, keys, settings: async () => values });
     cwd = await repo();
     agent = { id: "agent-1", workspaceId: "ws-a", parentAgentId: null, provider: "codex", cwd, title: null };
   });
@@ -127,6 +129,15 @@ describe("capture", () => {
     expect(proposal).toMatchObject({ kind: "new", subject: "dev server", source: { from: "project", provider: "claude" } });
     expect(fake.created[0].prompt).toContain("<<<File README.md");
     expect(fake.created[0].config.provider).toBe("claude/claude-default");
+  });
+
+  it("scans from the project's root when started in a subfolder of it", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev at the top.\n");
+    await mkdir(join(cwd, "src"));
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }));
+    capture.remember(fake.paseo);
+    await (await capture.startScan(REPO, join(cwd, "src"), "create")).done;
+    expect(fake.created[0].prompt).toContain("Run make dev at the top.");
   });
 
   it("re-checks saved memories against the project and proposes retiring a contradicted one", async () => {
@@ -178,14 +189,14 @@ describe("capture", () => {
     const open = [cwd, notes];
     const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev", body: "Run make dev.", paths: [] }] }), open, 20);
     capture.remember(fake.paseo);
-    await vi.waitFor(async () => expect(capture.lastRun(await readRepoKey(notes))).toMatchObject({ state: "done" }));
+    await vi.waitFor(async () => expect(capture.lastRun(await keys.keyOf(notes))).toMatchObject({ state: "done" }));
     expect(fake.created).toHaveLength(2);
     expect(fake.running.most).toBe(1);
     expect(fake.created[0].prompt).not.toContain("Also check each saved fact");
     const manual = tempDir("manual-");
     await writeFile(join(manual, "README.md"), "Scanned by hand.\n");
     open.push(manual);
-    await (await capture.startScan(await readRepoKey(manual), manual, "create")).done;
+    await (await capture.startScan(await keys.keyOf(manual), manual, "create")).done;
     expect(await capture.sweepProjects()).toEqual([]);
     // Not again, even weeks later.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -215,14 +226,14 @@ describe("capture", () => {
     const worker = join(workersDir(root), "w1");
     await mkdir(worker, { recursive: true });
     for (const folder of [off, noCapture, worker]) await writeFile(join(folder, "README.md"), "Notes.\n");
-    await repoPrefs.set(await readRepoKey(off), { enabled: false });
-    await repoPrefs.set(await readRepoKey(noCapture), { capture: "off" });
+    await repoPrefs.set(await keys.keyOf(off), { enabled: false });
+    await repoPrefs.set(await keys.keyOf(noCapture), { capture: "off" });
     const fake = fakePaseo([], JSON.stringify({ facts: [] }), [off, noCapture, worker]);
     capture.remember(fake.paseo);
     values = { ...values, projectAutoScan: "once" };
     expect(await capture.sweepProjects()).toEqual([]);
-    expect(await capture.scanIfDue(await readRepoKey(worker), worker)).toBe(false);
-    await expect(capture.startScan(await readRepoKey(worker), worker, "create")).rejects.toThrow(/worker folders are never scanned/);
+    expect(await capture.scanIfDue(await keys.keyOf(worker), worker)).toBe(false);
+    await expect(capture.startScan(await keys.keyOf(worker), worker, "create")).rejects.toThrow(/worker folders are never scanned/);
     expect(fake.created).toHaveLength(0);
   });
 
@@ -249,7 +260,7 @@ describe("capture", () => {
     const fake = fakePaseo([], JSON.stringify({ facts: [] }));
     capture.remember(fake.paseo);
     values = { ...values, projectAutoScan: "once", captureMaxPerDay: 4 };
-    for (let run = 0; run < 2; run += 1) await (await capture.startScan(await readRepoKey(other), other, "create")).done;
+    for (let run = 0; run < 2; run += 1) await (await capture.startScan(await keys.keyOf(other), other, "create")).done;
     expect(await capture.scanIfDue(REPO, cwd)).toBe(false);
     expect(fake.created).toHaveLength(2);
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -409,7 +420,7 @@ describe("capture", () => {
     const fake = fakePaseo(conversation(5), reply);
     capture.remember(fake.paseo);
     expect(await capture.captureNow({ ...agent, cwd: plain })).toBe(1);
-    const folder = await readRepoKey(plain);
+    const folder = await keys.keyOf(plain);
     expect(folder).toMatch(/^folder\//);
     expect((await proposals.list(folder)).map((proposal) => proposal.subject)).toEqual(["integration tests"]);
   });
@@ -470,7 +481,7 @@ describe("tidy limits", () => {
     const root = tempDir("tidy-");
     const store = new MemoryStore(root);
     const values = { ...memorySettings.schema.parse({}), captureMaxPerDay: 1 };
-    const capture = new Capture({ root, store, proposals: new ProposalStore(root), usage: new UsageLog(root), repoPrefs: new RepoPrefs(root), settings: async () => values });
+    const capture = new Capture({ root, store, proposals: new ProposalStore(root), usage: new UsageLog(root), repoPrefs: new RepoPrefs(root), keys: new ProjectKeys(root), settings: async () => values });
     const source = { by: "user" as const, provider: null, branch: null, commit: null };
     for (const subject of ["one", "two"]) await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject, body: subject, supersedes: null, source, citations: [] });
     const fake = fakePaseo([], "not json");

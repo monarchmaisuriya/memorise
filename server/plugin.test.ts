@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type MemorySettings, memorySettings, updateMemoryRpc } from "../shared/memory";
@@ -23,7 +23,7 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     registerProvider: () => undefined,
     registerUsageSource: () => undefined,
   } as unknown as PluginServerContext;
-  const workspaces: { workspaceDirectory?: string; projectRootPath: string }[] = [];
+  const workspaces: { workspaceDirectory?: string; projectRootPath: string; projectKind?: string }[] = [];
   const paseo = { agents: { ref: () => ({ respondToPermission }), list: async () => ({ entries: [] }) }, workspaces: {
       // One workspace per page, so a lookup must follow the cursor.
       list: async ({ page }: { page?: { cursor?: string } } = {}) => {
@@ -138,6 +138,13 @@ describe("memorise server entry", () => {
     errors.mockRestore();
     expect(config.systemPrompt).toContain("notes: Drafts live in drafts/.");
     expect(Object.keys(config.mcpServers)).toEqual(["paseo-memorise", "paseo-memorise-write"]);
+    // A workspace's project folder outside git is a project root, so an agent in a subfolder gets the
+    // same memories.
+    fake.workspaces.push({ projectRootPath: plain, projectKind: "non_git" });
+    await fake.workspaceCreated(plain);
+    const sub = join(plain, "drafts");
+    await mkdir(sub);
+    await vi.waitFor(async () => expect((await fake.create({ provider: "claude", cwd: sub })).config.systemPrompt).toContain("notes: Drafts live in drafts/."));
     await expect(fake.call("memory.save", { where: { directory: plain }, scope: "global", type: "howto", subject: "x", body: "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789" })).rejects.toThrow(/GitHub token/);
   });
 
@@ -389,6 +396,28 @@ describe("memorise server entry", () => {
     }
   });
 
+  it("gives the very first agent in a subfolder of a Paseo project outside git that project's memories", async () => {
+    const fake = start();
+    const site = tempDir("plugin-site-");
+    fake.workspaces.push({ projectRootPath: site, projectKind: "non_git" });
+    await fake.call("memory.save", { where: { directory: site }, scope: "repo", type: "howto", subject: "deploy", body: "Upload with rsync." });
+    const blog = join(site, "blog");
+    await mkdir(blog);
+    expect((await fake.create({ provider: "claude", cwd: blog })).config.systemPrompt).toContain("deploy: Upload with rsync.");
+  });
+
+  it("lists a folder memory meant for matching files once a matching file changed this week", async () => {
+    const fake = start();
+    const plain = tempDir("plugin-plain-");
+    const where = { directory: plain };
+    await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "drafts", body: "Drafts use the template.", paths: ["drafts/**"], activation: "files" });
+    const listed = async () => (await fake.create({ provider: "claude", cwd: plain })).config.systemPrompt as string;
+    expect(await listed()).not.toContain("Drafts use the template.");
+    await mkdir(join(plain, "drafts"));
+    await writeFile(join(plain, "drafts", "trip.md"), "Day one.\n");
+    expect(await listed()).toContain("Drafts use the template.");
+  });
+
   it("scans a new workspace's project when automatic scans are on, and the inbox says how it went", async () => {
     const fake = start({ ...defaults, projectAutoScan: "once" });
     const cwd = tempDir("plugin-plain-");
@@ -428,12 +457,12 @@ describe("memorise server entry", () => {
     await new ProposalStore(root).add([{ repoKey: "github.com/acme/docs", kind: "new", targets: [], type: "howto", subject: "docs", body: "Docs build with mkdocs.", paths: [], reason: "", source }], []);
     const { repos } = await fake.call("memory.repos", {});
     expect(repos).toEqual([
-      { repoKey: null, active: 0, retired: 0, lastModified: null },
-      // A workspace folder outside git is a project of its own.
-      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null },
-      { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String) },
-      { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null },
-      { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null },
+      { repoKey: null, active: 0, retired: 0, lastModified: null, label: null },
+      // A workspace folder outside git is a project of its own, shown by its folder's name.
+      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null, label: basename(notGit) },
+      { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String), label: null },
+      { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null, label: null },
+      { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null, label: null },
     ]);
   });
 });

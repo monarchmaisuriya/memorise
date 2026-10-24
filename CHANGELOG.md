@@ -4,6 +4,21 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-24
+
+### Added
+
+- Folders outside git keep their key when renamed or moved on the same disk. Memorise records each folder project's key in `folders.json` and finds the folder again by its disk identity; the manager shows the folder's current name.
+- An agent started in a subfolder of a Paseo project outside git gets that project's memories, unless the subfolder has memories or proposals of its own (so memories saved there by 0.5.0 stay with it). A folder where an agent merely ran claims nothing below it; the home folder and the filesystem root are never project roots.
+- In a folder outside git, memories about files changed in the last 7 days rank first, and "only for matching files" works.
+- Agents in a folder outside git can cite files: each citation is pinned to the file's content, and the memory is marked "needs check" when the file changes or goes.
+
+### Changed
+
+- A citation is pinned to either a git commit or a file's content hash; stored citations read as before.
+- A project scan reads from the project's root as Memorise resolves it.
+- Project files and cited files are read by one reader that refuses symlinks and hard links, checks that the file read is the file checked, and stops at its size limit.
+
 ## [0.5.0] - 2026-10-24
 
 ### Added
@@ -101,7 +116,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.0
 [0.5.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.5.0
 [0.4.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.1
 [0.4.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.0

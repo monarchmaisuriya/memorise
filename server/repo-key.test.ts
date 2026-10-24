@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isFolderKey, repoKeySchema } from "../shared/memory";
-import { folderKey, readRepoKey, repoKeyFromRemote } from "./repo-key";
+import { ProjectKeys } from "./project-keys";
+import { folderKey, readGitRepo, repoKeyFromRemote } from "./repo-key";
 import { tempDir } from "./test-temp-dir";
 
 describe("repoKeyFromRemote", () => {
@@ -21,21 +22,23 @@ describe("repoKeyFromRemote", () => {
   });
 });
 
-describe("readRepoKey", () => {
+describe("readGitRepo and folder keys", () => {
   function initRepo(dir: string): void {
     execFileSync("git", ["init", "-q", dir]);
   }
 
-  it("gives a folder outside git its own key, named after the folder, the same through a symlink", async () => {
+  it("finds no repo outside git, and keys a folder by its name and real path, the same through a symlink", async () => {
     const parent = tempDir("no-repo-");
     const folder = join(parent, "My Notes!");
     mkdirSync(folder);
     symlinkSync(folder, join(parent, "link"));
-    const key = await readRepoKey(folder);
+    expect(await readGitRepo(folder)).toBeNull();
+    const keys = new ProjectKeys(tempDir("keys-data-"));
+    const { key } = await keys.resolve(folder);
     expect(key).toMatch(/^folder\/my-notes-[0-9a-f]{12}$/);
-    expect(await readRepoKey(join(parent, "link"))).toBe(key);
-    expect(await readRepoKey(parent)).not.toBe(key);
-    expect(isFolderKey(key ?? "")).toBe(true);
+    expect((await keys.resolve(join(parent, "link"))).key).toBe(key);
+    expect((await keys.resolve(parent)).key).not.toBe(key);
+    expect(isFolderKey(key)).toBe(true);
   });
 
   it("names the filesystem root and long folder names within the repo key rules", () => {
@@ -48,11 +51,18 @@ describe("readRepoKey", () => {
     for (const path of ["/", "/tmp/..x", "/tmp/~a", "/tmp/日本語", `/tmp/${"z".repeat(300)}`]) expect(repoKeySchema.safeParse(folderKey(path)).success).toBe(true);
   });
 
+  it("finds the repo from inside its .git folder, where there is no work tree", async () => {
+    const repo = tempDir("repo-");
+    initRepo(repo);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/api.git"]);
+    expect((await readGitRepo(join(repo, ".git")))?.key).toBe("github.com/acme/api");
+  });
+
   it("uses the origin remote, shared by every worktree", async () => {
     const repo = tempDir("repo-");
     initRepo(repo);
     execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/api.git"]);
-    expect(await readRepoKey(repo)).toBe("github.com/acme/api");
+    expect(await readGitRepo(repo)).toEqual({ key: "github.com/acme/api", top: realpathSync(repo) });
   });
 
   it("falls back to one key for all worktrees of a repo with no origin", async () => {
@@ -61,8 +71,8 @@ describe("readRepoKey", () => {
     execFileSync("git", ["-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
     const worktree = join(tempDir("wt-"), "wt");
     execFileSync("git", ["-C", repo, "worktree", "add", "-q", worktree]);
-    const key = await readRepoKey(repo);
+    const key = (await readGitRepo(repo))?.key;
     expect(key).toMatch(/^local\/[0-9a-f]{16}$/);
-    expect(await readRepoKey(worktree)).toBe(key);
+    expect((await readGitRepo(worktree))?.key).toBe(key);
   });
 });

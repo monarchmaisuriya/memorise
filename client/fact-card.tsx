@@ -100,7 +100,7 @@ export function FactCard({ fact, where, hasRepo, styles, selected, onSelect, sho
         {repoLabel}
         {by} · {fact.created.slice(0, 10)} · shown {shown} · read {read} · found {found}
         {fact.paths.length > 0 ? ` · about ${fact.paths.join(", ")}` : ""}
-        {fact.citations.length > 0 ? ` · cites ${fact.citations.map((c) => `${c.path}${c.lines ? `:${c.lines}` : ""}@${c.commit}`).join(", ")}` : ""}
+        {fact.citations.length > 0 ? ` · cites ${fact.citations.map((c) => `${c.path}${c.lines ? `:${c.lines}` : ""}@${c.commit ?? `#${c.hash}`}`).join(", ")}` : ""}
       </Text>
       {action.error && <Text style={styles.danger}>{action.error instanceof Error ? action.error.message : String(action.error)}</Text>}
       {current ? (
