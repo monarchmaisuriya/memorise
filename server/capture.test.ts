@@ -36,7 +36,7 @@ function conversation(userTurns: number, extra: AgentTimelineItem[] = []): Agent
 
 // A fake of the slice of the Paseo API capture uses: timeline refetch and append, agent create with
 // a scripted worker reply, archive.
-function fakePaseo(items: AgentTimelineItem[], reply: string) {
+function fakePaseo(items: AgentTimelineItem[], reply: string, openFolders: string[] = []) {
   const created: Array<Record<string, any>> = [];
   const appended: unknown[] = [];
   const archived: string[] = [];
@@ -73,7 +73,10 @@ function fakePaseo(items: AgentTimelineItem[], reply: string) {
         };
       },
     },
-    workspaces: { archive: async (id: string) => archived.push(id) },
+    workspaces: {
+      archive: async (id: string) => archived.push(id),
+      list: async () => ({ entries: openFolders.map((folder) => ({ projectRootPath: folder })), pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+    },
     providers: { listModels: async (provider: string) => ({ models: [{ provider, id: `${provider}-small` }, { provider, id: `${provider}-default`, isDefault: true }] }) },
   } as unknown as PaseoApi;
   return { paseo, created, appended, archived };
@@ -149,6 +152,53 @@ describe("capture", () => {
     expect(await (await capture.startTidy(REPO, null)).done).toBe(1);
     expect((await proposals.list(REPO)).map((proposal) => proposal.kind)).toEqual(["merge"]);
     expect((await store.list(REPO)).filter((fact) => !fact.superseded && fact.status === "active")).toHaveLength(2);
+  });
+
+  it("with automatic scans off, a sweep scans nothing", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }), [cwd]);
+    capture.remember(fake.paseo);
+    expect(await capture.sweepProjects()).toEqual([]);
+    expect(fake.created).toHaveLength(0);
+  });
+
+  it("scans each open project once when set to once, one at a time, counting a scan you started", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const notes = tempDir("notes-");
+    await writeFile(join(notes, "README.md"), "Trip notes.\n");
+    const manual = tempDir("manual-");
+    await writeFile(join(manual, "README.md"), "Scanned by hand.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev", body: "Run make dev.", paths: [] }] }), [cwd, notes, manual]);
+    // Set after the sweep that the first sight of Paseo starts, which then finds the setting off.
+    capture.remember(fake.paseo);
+    values = { ...values, projectAutoScan: "once" };
+    await (await capture.startScan(await readRepoKey(manual), manual, "create")).done;
+    expect(await capture.sweepProjects()).toEqual([REPO, await readRepoKey(notes)]);
+    expect(fake.created).toHaveLength(3);
+    expect(fake.created[1].prompt).not.toContain("Also check each saved fact");
+    // Not again, even weeks later.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 30 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([]);
+    expect(fake.created).toHaveLength(3);
+  });
+
+  it("re-checks a project a week after its last scan when set to weekly, and skips a project with memory off", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const off = tempDir("off-");
+    await writeFile(join(off, "README.md"), "Private.\n");
+    await repoPrefs.set(await readRepoKey(off), { enabled: false });
+    const fake = fakePaseo([], JSON.stringify({ facts: [], actions: [] }), [cwd, off]);
+    capture.remember(fake.paseo);
+    values = { ...values, projectAutoScan: "weekly" };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    expect(await capture.sweepProjects()).toEqual([REPO]);
+    vi.setSystemTime(Date.now() + 6 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([]);
+    vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60_000);
+    expect(await capture.sweepProjects()).toEqual([REPO]);
+    expect(fake.created[1].prompt).toContain("Also check each saved fact");
+    expect(fake.created).toHaveLength(2);
   });
 
   it("with auto mode on, saves new memories marked auto and leaves changes for review", async () => {

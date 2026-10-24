@@ -38,6 +38,7 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     respondToPermission,
     create: (config: Record<string, unknown>, env?: Record<string, string>) => (before.get("agent.create") as (input: unknown, context: unknown) => Promise<{ config: Record<string, any> }>)({ request: { config, ...(env ? { env } : {}) } }, { paseo }),
     call: (name: string, input: unknown) => (rpc.get(name) as (input: unknown, context: unknown) => Promise<any>)(input, { paseo }),
+    workspaceCreated: (cwd: string) => (on.get("workspace.created") as (event: unknown, context: unknown) => Promise<void>)({ workspace: { id: "ws-1", projectId: "p-1", cwd, name: null, archivedAt: null } }, { paseo }),
     permission: (request: Record<string, unknown>, cwd = "/tmp") => (on.get("agent.permission_requested") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id: "agent-1", cwd }, request }, { paseo }),
   };
 }
@@ -386,6 +387,16 @@ describe("memorise server entry", () => {
     for (const scanned of [where, { repoKey: "github.com/acme/web" }]) {
       await vi.waitFor(async () => expect((await fake.call("memory.proposals.list", { where: scanned })).lastRun).toMatchObject({ kind: "scan", state: "failed" }));
     }
+  });
+
+  it("scans a new workspace's project when automatic scans are on, and the inbox says how it went", async () => {
+    const fake = start({ ...defaults, projectAutoScan: "once" });
+    const cwd = tempDir("plugin-plain-");
+    await writeFile(join(cwd, "README.md"), "Notes.\n");
+    await fake.workspaceCreated(cwd);
+    // The fake Paseo cannot start a worker, so the scan that started fails, and the inbox is told.
+    const { lastRun } = await fake.call("memory.proposals.list", { where: { directory: cwd } });
+    expect(lastRun).toMatchObject({ kind: "scan", state: "failed" });
   });
 
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {

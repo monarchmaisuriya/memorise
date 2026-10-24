@@ -30,6 +30,11 @@ const CAPTURE_PROVIDER_OPTIONS = [
   ...PROVIDERS.map((provider) => ({ label: provider, value: provider })),
 ] as const;
 const TIDY_PROVIDER_OPTIONS = PROVIDERS.map((provider) => ({ label: provider, value: provider }));
+const PROJECT_AUTO_SCAN_OPTIONS = [
+  { label: "Off", value: "off" as const },
+  { label: "Once per project", value: "once" as const },
+  { label: "Once, then re-check weekly", value: "weekly" as const },
+];
 
 export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(memorySettings);
@@ -138,6 +143,18 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
           />
           {TIDY_TEXTS.map(input)}
           {saveAction}
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection title="Project scans">
+        <SettingsCard>
+          <SettingsSelect
+            label="Create memories from projects automatically"
+            hint="For every project with an open workspace (git or not), runs Create from project with the tidy provider; weekly also re-checks saved memories against the files. Results wait for review unless the repo has auto-approve on. Each scan is a model call within the daily limit."
+            value={settings.values.projectAutoScan}
+            options={PROJECT_AUTO_SCAN_OPTIONS}
+            disabled={settings.saving}
+            onValueChange={(projectAutoScan) => save({ ...settings.values, projectAutoScan })}
+          />
         </SettingsCard>
       </SettingsSection>
     </>

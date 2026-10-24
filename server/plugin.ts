@@ -50,6 +50,7 @@ import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
 import { PathMatcher, workFiles } from "./work-files";
+import { openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
 
 const CITATION_BUDGET_MS = 1_000;
@@ -98,6 +99,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const repoPrefs = new RepoPrefs(root);
     const capture = new Capture({ root, store, proposals, usage, repoPrefs, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
+    capture.startProjectScans();
     const { mcpPort } = await currentSettings();
     const mcp = new MemoryMcp({
       store,
@@ -202,6 +204,14 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const isRead = request.name.startsWith(`mcp__${READ_SERVER}__`) || (request.name === "CodexMcpElicitation" && request.metadata?.serverName === READ_SERVER);
     if (!isRead || !(await currentSettings()).autoApproveReads) return;
     await paseo.agents.ref(agent.id).respondToPermission({ requestId: request.id, response: { behavior: "allow" } });
+  });
+
+  // A new workspace's project is scanned when automatic project scans are on and it is due.
+  server.on("workspace.created", async ({ workspace }, { paseo }) => {
+    const { capture } = await runtime;
+    capture.remember(paseo);
+    const repoKey = await readRepoKey(workspace.cwd);
+    await capture.scanIfDue(repoKey, workspace.cwd).catch((error: unknown) => console.error(`[memorise] automatic project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
   });
 
   server.on("agent.turn_started", async ({ agent }) => {
@@ -396,28 +406,6 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   });
 
   server.handle(proposalsSummaryRpc, async () => ({ repos: await (await runtime).proposals.summary() }));
-
-  // The repo of every open Paseo workspace, across every page, with one checkout of each. A project's
-  // main checkout is preferred over a worktree of a branch; a folder that is gone or not in git is
-  // skipped.
-  async function openRepoCheckouts(paseo: PaseoApi): Promise<Map<string, string>> {
-    const checkouts = new Map<string, string>();
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const { entries, pageInfo } = await paseo.workspaces.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
-      for (const workspace of entries) {
-        for (const folder of [workspace.projectRootPath, workspace.workspaceDirectory]) {
-          if (!folder || seen.has(folder)) continue;
-          seen.add(folder);
-          const repoKey = await readRepoKey(folder).catch(() => null);
-          if (repoKey && !checkouts.has(repoKey)) checkouts.set(repoKey, folder);
-        }
-      }
-      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
-    } while (cursor);
-    return checkouts;
-  }
 
   // A checkout to read for a project scan: the given workspace folder, or the folder of an open
   // workspace that belongs to the repo.

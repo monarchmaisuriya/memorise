@@ -405,6 +405,9 @@ export const memorySettings = defineSettings({
     tidyProvider: providerSchema.default("claude"),
     tidyModel: z.string().trim().max(100).default(""),
     tidyWeekly: z.boolean().default(false),
+    // Project scans started by the plugin for every project with an open workspace: never, once per
+    // project, or once and then a re-check each week.
+    projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),
   }),
 });
 export type MemorySettings = z.infer<typeof memorySettings.schema>;
