@@ -4,6 +4,14 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-24
+
+### Fixed
+
+- The manager keeps the repository it was opened for, and the chosen one, in its repository list before they have any memories, so either can be chosen again.
+- "Revert to this" and "Show prompt text" size to their label instead of stretching across the card.
+- The export count says "1 memory" instead of "1 memories".
+
 ## [0.2.0] - 2026-10-24
 
 ### Added
@@ -38,6 +46,7 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.1
 [0.2.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.0
 [0.1.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.1.0

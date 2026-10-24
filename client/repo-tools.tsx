@@ -66,7 +66,9 @@ export function TransferCard({ where, scope, styles }: { where: Where; scope: Sc
       </View>
       {exported.data && (
         <>
-          <Text style={styles.muted}>{exported.data.count} memories. Select the text to copy it.</Text>
+          <Text style={styles.muted}>
+            {exported.data.count} {exported.data.count === 1 ? "memory" : "memories"}. Select the text to copy it.
+          </Text>
           <TextInput accessibilityLabel="Exported memories" multiline editable={false} selectTextOnFocus value={exported.data.text} style={[styles.input, { minHeight: 120, fontFamily: "monospace" }]} />
         </>
       )}
@@ -129,7 +131,9 @@ export function PreviewCard({ directory, styles }: { directory: string; styles: 
           {item.titleOnly ? " · title only" : ""}
         </Text>
       ))}
-      <Button label={showText ? "Hide prompt text" : "Show prompt text"} styles={styles} onPress={() => setShowText((value) => !value)} />
+      <View style={styles.row}>
+        <Button label={showText ? "Hide prompt text" : "Show prompt text"} styles={styles} onPress={() => setShowText((value) => !value)} />
+      </View>
       {showText && <Text style={[styles.muted, { fontFamily: "monospace" }]}>{text}</Text>}
     </View>
   );

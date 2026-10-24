@@ -105,11 +105,16 @@ export function ManagerScreen({ theme, layout, params }: PluginScreenProps) {
       return next;
     });
 
+  // The repo the screen was opened for, and the chosen one, are listed even before they have any
+  // memory files, so either can be chosen again.
+  const listedRepos = repos.data?.repos ?? [];
+  const missing = [...new Set([params.repo, repoKey])].filter((key): key is string => !!key && key !== GLOBAL && !listedRepos.some((repo) => repo.repoKey === key));
+  const shownRepos = [...listedRepos, ...missing.map((key) => ({ repoKey: key, active: 0, retired: 0, lastModified: null }))];
   const repoList = (
     <View style={{ gap: 6, width: layout.compact ? undefined : 260 }}>
       <Text style={styles.title}>Memorise</Text>
       {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
-      {(repos.data?.repos ?? []).map((repo) => {
+      {shownRepos.map((repo) => {
         const id = repo.repoKey ?? GLOBAL;
         return (
           <Pressable key={id} accessibilityRole="button" accessibilityLabel={`Show ${repo.repoKey ?? "global"} memories`} onPress={() => setChosen(id)} style={[styles.card, chosen === id && { borderColor: theme.colors.accent }]}>
