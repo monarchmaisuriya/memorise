@@ -60,13 +60,14 @@ const SORTS: Record<Sort, (a: ListedFact, b: ListedFact) => number> = {
   "least used": (a, b) => uses(a) - uses(b),
 };
 
-// The filters that differ from the defaults, labelled for the chips under the search box.
-export function activeFilters(filters: ViewFilters): { key: keyof ViewFilters; label: string }[] {
+// The filters that differ from the defaults, labelled for the chips under the search box. While a
+// search orders the list, the sort does not apply, so it gets no chip.
+export function activeFilters(filters: ViewFilters, searching: boolean): { key: keyof ViewFilters; label: string }[] {
   const active: { key: keyof ViewFilters; label: string }[] = [];
   if (filters.status !== DEFAULT_FILTERS.status) active.push({ key: "status", label: filters.status });
   if (filters.type !== DEFAULT_FILTERS.type) active.push({ key: "type", label: filters.type });
   if (filters.control !== DEFAULT_FILTERS.control) active.push({ key: "control", label: CONTROL_LABEL[filters.control] });
-  if (filters.sort !== DEFAULT_FILTERS.sort) active.push({ key: "sort", label: `sorted by ${filters.sort}` });
+  if (!searching && filters.sort !== DEFAULT_FILTERS.sort) active.push({ key: "sort", label: `sorted by ${filters.sort}` });
   return active;
 }
 
@@ -78,6 +79,18 @@ export function applyFilters(facts: readonly ListedFact[], filters: ViewFilters,
     (fact) => fact.scope === scope && (!rank || rank.has(fact.id)) && matchesStatus(fact, filters.status) && (filters.type === "any" || fact.type === filters.type) && matchesControl(fact, filters.control, now),
   );
   return rank ? kept.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)) : kept.sort(SORTS[filters.sort]);
+}
+
+// Bulk actions act only on selected memories that are on screen now, so a search or filter that
+// hides a selected memory also keeps it out of the action.
+export function shownSelection(selected: ReadonlySet<string>, shown: readonly ListedFact[]): string[] {
+  return shown.filter((fact) => selected.has(fact.id)).map((fact) => fact.id);
+}
+
+// Every repo's list also carries the global memories; each list contributes only its own scope, so
+// a global memory appears once (from the global list, repoKey null).
+export function mergeScopes(lists: readonly { repoKey: string | null; facts: readonly ListedFact[] }[]): ListedFact[] {
+  return lists.flatMap(({ repoKey, facts }) => facts.filter((fact) => fact.scope === (repoKey ? "repo" : "global")));
 }
 
 export type AttentionReason = "off" | "ended" | "hidden" | "unused";

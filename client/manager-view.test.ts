@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeFilters, applyFilters, attentionGroups, DEFAULT_FILTERS, type ListedFact } from "./manager-view";
+import { activeFilters, applyFilters, attentionGroups, DEFAULT_FILTERS, type ListedFact, mergeScopes, shownSelection } from "./manager-view";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-24T12:00:00Z");
@@ -36,8 +36,40 @@ function fact(overrides: Partial<ListedFact> = {}): ListedFact {
 
 describe("manager filters", () => {
   it("names only the filters that differ from the defaults", () => {
-    expect(activeFilters(DEFAULT_FILTERS)).toEqual([]);
-    expect(activeFilters({ ...DEFAULT_FILTERS, type: "gotcha", control: "off" }).map((filter) => filter.label)).toEqual(["gotcha", "off for agents"]);
+    expect(activeFilters(DEFAULT_FILTERS, false)).toEqual([]);
+    expect(activeFilters({ ...DEFAULT_FILTERS, type: "gotcha", control: "off" }, false).map((filter) => filter.label)).toEqual(["gotcha", "off for agents"]);
+  });
+
+  it("leaves out the sort chip while a search orders the list", () => {
+    expect(activeFilters({ ...DEFAULT_FILTERS, sort: "most used" }, false).map((filter) => filter.label)).toEqual(["sorted by most used"]);
+    expect(activeFilters({ ...DEFAULT_FILTERS, sort: "most used" }, true)).toEqual([]);
+  });
+
+  it("filters by each control", () => {
+    const plain = fact({ subject: "plain" });
+    const pinned = fact({ subject: "pinned", pinned: true });
+    const off = fact({ subject: "off", enabled: false });
+    const ended = fact({ subject: "ended", until: "2026-10-01" });
+    const files = fact({ subject: "files", activation: "files", paths: ["src/**"] });
+    const title = fact({ subject: "title", activation: "title" });
+    const manual = fact({ subject: "manual", activation: "manual" });
+    const all = [plain, pinned, off, ended, files, title, manual];
+    const by = (control: (typeof DEFAULT_FILTERS)["control"]) => applyFilters(all, { ...DEFAULT_FILTERS, control }, "repo", null, NOW).map((item) => item.subject);
+    expect(by("pinned")).toEqual(["pinned"]);
+    expect(by("off")).toEqual(["off"]);
+    expect(by("ended")).toEqual(["ended"]);
+    expect(by("files")).toEqual(["files"]);
+    expect(by("title")).toEqual(["title"]);
+    expect(by("manual")).toEqual(["manual"]);
+  });
+
+  it("filters replaced and all statuses, and sorts by use", () => {
+    const current = fact({ subject: "current", usage: { shown: 5, read: 0, found: 0, lastShown: null } });
+    const replaced = fact({ subject: "replaced", superseded: true, usage: { shown: 1, read: 0, found: 0, lastShown: null } });
+    const retired = fact({ subject: "retired", status: "retired", usage: { shown: 9, read: 0, found: 0, lastShown: null } });
+    expect(applyFilters([current, replaced, retired], { ...DEFAULT_FILTERS, status: "replaced" }, "repo", null, NOW).map((item) => item.subject)).toEqual(["replaced"]);
+    expect(applyFilters([current, replaced, retired], { ...DEFAULT_FILTERS, status: "all", sort: "most used" }, "repo", null, NOW).map((item) => item.subject)).toEqual(["retired", "current", "replaced"]);
+    expect(applyFilters([current, replaced, retired], { ...DEFAULT_FILTERS, status: "all", sort: "least used" }, "repo", null, NOW).map((item) => item.subject)).toEqual(["replaced", "current", "retired"]);
   });
 
   it("keeps the chosen scope and status, then sorts", () => {
@@ -57,6 +89,26 @@ describe("manager filters", () => {
   });
 });
 
+describe("selection and scopes", () => {
+  it("acts only on selected memories that are shown", () => {
+    const a = fact({ subject: "a" });
+    const b = fact({ subject: "b" });
+    expect(shownSelection(new Set([a.id, b.id, "gone"]), [a])).toEqual([a.id]);
+  });
+
+  it("keeps each global memory once when every repo's list also carries them", () => {
+    const global = fact({ subject: "global", scope: "global", repoKey: null });
+    const api = fact({ subject: "api" });
+    const web = fact({ subject: "web", repoKey: "github.com/acme/web" });
+    const merged = mergeScopes([
+      { repoKey: null, facts: [global] },
+      { repoKey: "github.com/acme/api", facts: [global, api] },
+      { repoKey: "github.com/acme/web", facts: [global, web] },
+    ]);
+    expect(merged.map((item) => item.subject)).toEqual(["global", "api", "web"]);
+  });
+});
+
 describe("needs attention", () => {
   it("groups current memories by the first reason that applies, and leaves the rest out", () => {
     const off = fact({ subject: "off", enabled: false });
@@ -69,5 +121,11 @@ describe("needs attention", () => {
     const groups = attentionGroups([off, ended, hidden, unused, fresh, used, replaced], NOW);
     const subjects = Object.fromEntries(Object.entries(groups).map(([reason, facts]) => [reason, facts.map((item) => item.subject)]));
     expect(subjects).toEqual({ off: ["off"], ended: ["ended"], hidden: ["hidden"], unused: ["unused"] });
+  });
+
+  it("counts a memory as never used only after 14 days", () => {
+    const day14 = fact({ subject: "day 14", created: new Date(NOW - 14 * DAY).toISOString() });
+    const day15 = fact({ subject: "day 15", created: new Date(NOW - 15 * DAY).toISOString() });
+    expect((attentionGroups([day14, day15], NOW).unused ?? []).map((item) => item.subject)).toEqual(["day 15"]);
   });
 });

@@ -1,12 +1,12 @@
 import { type PluginScreenProps, useRpc } from "@getpaseo/plugin/client";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { type BulkAction, bulkMemoryRpc, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, searchMemoriesRpc } from "../shared/memory";
 import { FactCard } from "./fact-card";
 import { FactEditor } from "./fact-editor";
 import { Inbox } from "./inbox";
-import { activeFilters, applyFilters, ATTENTION, attentionGroups, type Control, CONTROL_LABEL, DEFAULT_FILTERS, type ListedFact, type ViewFilters } from "./manager-view";
+import { activeFilters, applyFilters, ATTENTION, attentionGroups, type Control, CONTROL_LABEL, DEFAULT_FILTERS, type ListedFact, mergeScopes, shownSelection, type ViewFilters } from "./manager-view";
 import { memoryChanged, onMemoryChanged } from "./memory-events";
 import { Button, Chip, type Styles, useStyles } from "./panel-ui";
 import { RepoPrefsCard, TransferCard } from "./repo-tools";
@@ -90,17 +90,21 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
   const facts = useQuery({ queryKey: ["memorise", "manager", repoKey], queryFn: () => list({ where }) });
   const proposals = useQuery({ queryKey: ["memorise-proposals", where], queryFn: () => listProposals({ where }), enabled: repoKey !== null });
   const trimmed = query.trim();
-  const found = useQuery({ queryKey: ["memorise", "search", repoKey, trimmed], queryFn: () => search({ where, query: trimmed }), enabled: trimmed !== "" });
+  // While the next search runs, the previous results stay; before the first one, nothing is shown.
+  const found = useQuery({ queryKey: ["memorise", "search", repoKey, trimmed], queryFn: () => search({ where, query: trimmed }), enabled: trimmed !== "", placeholderData: keepPreviousData });
+  const shown = useMemo(() => applyFilters(facts.data?.facts ?? [], filters, scope, trimmed ? (found.data?.ids ?? []) : null), [facts.data, filters, scope, trimmed, found.data]);
+  const chosen = shownSelection(selected, shown);
+  // A change to what is chosen disarms a pending "Confirm delete".
+  useEffect(() => setConfirmDelete(false), [chosen.length]);
   const runBulk = useMutation({
-    mutationFn: (action: BulkAction) => bulk({ where, ids: [...selected], action }),
+    mutationFn: (action: BulkAction) => bulk({ where, ids: chosen, action }),
     onSuccess: () => {
       setSelected(new Set());
       setConfirmDelete(false);
       memoryChanged();
     },
   });
-  const shown = useMemo(() => applyFilters(facts.data?.facts ?? [], filters, scope, trimmed && found.data ? found.data.ids : null), [facts.data, filters, scope, trimmed, found.data]);
-  const active = activeFilters(filters);
+  const active = activeFilters(filters, trimmed !== "");
   const pending = proposals.data?.proposals.length ?? 0;
 
   const toggle = (id: string) =>
@@ -158,12 +162,12 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
           {found.error && <Text style={styles.danger}>{found.error.message}</Text>}
           {selecting && (
             <View style={[styles.card, styles.row]}>
-              <Text style={styles.body}>{selected.size} selected</Text>
+              <Text style={styles.body}>{chosen.length} selected</Text>
               <Button label="Select all shown" styles={styles} onPress={() => setSelected(new Set(shown.map((fact) => fact.id)))} />
-              {selected.size > 0 &&
+              {chosen.length > 0 &&
                 BULK.map(({ action, label }) => <Button key={action} label={label} styles={styles} onPress={() => runBulk.mutate(action)} />)}
-              {selected.size > 0 && (
-                <Button label={confirmDelete ? `Confirm delete ${selected.size}` : "Delete"} tone="danger" styles={styles} onPress={() => (confirmDelete ? runBulk.mutate("delete") : setConfirmDelete(true))} />
+              {chosen.length > 0 && (
+                <Button label={confirmDelete ? `Confirm delete ${chosen.length}` : "Delete"} tone="danger" styles={styles} onPress={() => (confirmDelete ? runBulk.mutate("delete") : setConfirmDelete(true))} />
               )}
             </View>
           )}
@@ -188,8 +192,7 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
 function useAllFacts(repoKeys: readonly (string | null)[]) {
   const list = useRpc(listMemoriesRpc);
   const results = useQueries({ queries: repoKeys.map((repoKey) => ({ queryKey: ["memorise", "manager", repoKey], queryFn: () => list({ where: { repoKey } }) })) });
-  // Each repo's list also carries the global memories; keep them once, from the global list.
-  const facts: ListedFact[] = results.flatMap((result, index) => (result.data?.facts ?? []).filter((fact) => fact.scope === (repoKeys[index] ? "repo" : "global")));
+  const facts: ListedFact[] = mergeScopes(results.map((result, index) => ({ repoKey: repoKeys[index], facts: result.data?.facts ?? [] })));
   return { facts, pending: results.some((result) => result.isPending), error: results.find((result) => result.error)?.error ?? null };
 }
 
@@ -200,7 +203,7 @@ function AttentionView({ facts, styles }: { facts: ListedFact[]; styles: Styles 
   return (
     <View style={{ gap: 12 }}>
       <Text style={styles.title}>Needs attention</Text>
-      <Text style={styles.muted}>{total === 0 ? "Nothing needs a look right now." : "Memories agents cannot see, or have never used. Keep, edit, turn on, or retire them."}</Text>
+      <Text style={styles.muted}>{total === 0 ? "Nothing needs a look right now." : "Memories agents cannot see, or have never used. Edit, pin, turn on, or retire each one."}</Text>
       {ATTENTION.map(({ reason, title, rule }) => {
         const items = groups[reason] ?? [];
         if (items.length === 0) return null;
@@ -241,27 +244,38 @@ export function ManagerScreen(props: PluginScreenProps) {
   const all = useAllFacts(listed.map((repo) => repo.repoKey));
   const attentionCount = Object.values(attentionGroups(all.facts)).reduce((sum, items) => sum + (items?.length ?? 0), 0);
 
-  const nav = (
-    <View style={{ gap: 4, width: layout.compact ? undefined : 260 }}>
+  const repoEntries = shownRepos.map((repo) => ({
+    id: repo.repoKey ?? GLOBAL,
+    label: repo.repoKey ?? "Global (every repo)",
+    detail: `${repo.active} active${repo.retired > 0 ? ` · ${repo.retired} retired` : ""}${repo.lastModified ? ` · changed ${repo.lastModified.slice(0, 10)}` : ""}`,
+  }));
+  const manageEntries = [
+    { id: ATTENTION_VIEW, label: "Needs attention", detail: attentionCount > 0 ? `${attentionCount} to review` : "nothing to review" },
+    { id: SETTINGS_VIEW, label: "Settings", detail: "memory, capture, tidy" },
+  ];
+  // Narrow layouts show the same entries as one wrapping row of chips above the content.
+  const nav = layout.compact ? (
+    <View style={{ gap: 8 }}>
+      <Text style={styles.title}>Memorise</Text>
+      {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
+      <View style={styles.row}>
+        {[...repoEntries, ...manageEntries].map((entry) => (
+          <Chip key={entry.id} label={entry.id === ATTENTION_VIEW && attentionCount > 0 ? `${entry.label} · ${attentionCount}` : entry.label} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
+        ))}
+      </View>
+    </View>
+  ) : (
+    <View style={{ gap: 4, width: 260 }}>
       <Text style={styles.title}>Memorise</Text>
       {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
       <Text style={styles.label}>Memories</Text>
-      {shownRepos.map((repo) => {
-        const id = repo.repoKey ?? GLOBAL;
-        return (
-          <NavItem
-            key={id}
-            label={repo.repoKey ?? "Global (every repo)"}
-            detail={`${repo.active} active${repo.retired > 0 ? ` · ${repo.retired} retired` : ""}`}
-            on={view === id}
-            onPress={() => setView(id)}
-            styles={styles}
-          />
-        );
-      })}
+      {repoEntries.map((entry) => (
+        <NavItem key={entry.id} label={entry.label} detail={entry.detail} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
+      ))}
       <Text style={[styles.label, { marginTop: 8 }]}>Manage</Text>
-      <NavItem label="Needs attention" detail={attentionCount > 0 ? `${attentionCount} to review` : "nothing to review"} on={view === ATTENTION_VIEW} onPress={() => setView(ATTENTION_VIEW)} styles={styles} />
-      <NavItem label="Settings" detail="memory, capture, tidy" on={view === SETTINGS_VIEW} onPress={() => setView(SETTINGS_VIEW)} styles={styles} />
+      {manageEntries.map((entry) => (
+        <NavItem key={entry.id} label={entry.label} detail={entry.detail} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
+      ))}
     </View>
   );
 

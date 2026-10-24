@@ -92,12 +92,13 @@ export function Inbox({ where, styles, onChanged }: { where: Where; styles: Styl
       <Text style={styles.muted}>
         {captureOn
           ? `Capture is on: finished sessions propose memories here. Runs today: ${query.data.captureRunsToday}.`
-          : "Capture is off. Turn it on in Settings > Plugins > Memorise to have finished sessions propose memories."}
+          : "Capture is off. Turn it on in Settings (in the manager, or Settings > Plugins > Memorise) to have finished sessions propose memories."}
       </Text>
       <View style={styles.row}>
         <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} styles={styles} onPress={() => tidyRun.mutate()} />
         <Button label="Refresh" styles={styles} onPress={refresh} />
       </View>
+      {"repoKey" in where && <Text style={styles.muted}>From the manager, tidy cannot check citations against a checkout; run it from a workspace's panel to include that check.</Text>}
       {tidyRun.isSuccess && <Text style={styles.muted}>Tidy started. Its proposals appear here in a few minutes; press Refresh.</Text>}
       {tidyRun.error && <Text style={styles.danger}>{tidyRun.error.message}</Text>}
       {query.data.proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
