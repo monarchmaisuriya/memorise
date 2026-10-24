@@ -2,7 +2,7 @@ import { type PluginScreenProps, useRpc } from "@getpaseo/plugin/client";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { type BulkAction, bulkMemoryRpc, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, searchMemoriesRpc } from "../shared/memory";
+import { type BulkAction, bulkMemoryRpc, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, proposalsSummaryRpc, searchMemoriesRpc, tidyMemoryRpc } from "../shared/memory";
 import { FactCard } from "./fact-card";
 import { FactEditor } from "./fact-editor";
 import { Inbox } from "./inbox";
@@ -14,6 +14,7 @@ import { MemorySettingsScreen } from "./settings-screen";
 
 const GLOBAL = "global";
 const ATTENTION_VIEW = "attention";
+const PROPOSALS_VIEW = "proposals";
 const SETTINGS_VIEW = "settings";
 
 const BULK: { action: BulkAction; label: string }[] = [
@@ -196,6 +197,53 @@ function useAllFacts(repoKeys: readonly (string | null)[]) {
   return { facts, pending: results.some((result) => result.isPending), error: results.find((result) => result.error)?.error ?? null };
 }
 
+// Every repo's waiting proposals in one place, and a tidy of every repo with memories.
+function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: string; pending: number }[]; repoKeys: string[]; styles: Styles }) {
+  const tidy = useRpc(tidyMemoryRpc);
+  // Each repo is tidied on its own, so one refusal (daily limit, a tidy already running) does not stop the rest.
+  const tidyAll = useMutation({
+    mutationFn: async () => {
+      const results: string[] = [];
+      for (const repoKey of repoKeys) {
+        try {
+          await tidy({ where: { repoKey } });
+          results.push(`${repoKey}: started`);
+        } catch (error) {
+          results.push(`${repoKey}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return results;
+    },
+  });
+  const total = pending.reduce((sum, repo) => sum + repo.pending, 0);
+  return (
+    <View style={{ gap: 12 }}>
+      <Text style={styles.title}>Proposals</Text>
+      <Text style={styles.muted}>
+        {total === 0
+          ? "No proposals waiting. Capture, tidy, and project scans (in a repo's Proposed tab) add them here."
+          : "Proposed memories and changes from capture, tidy, and project scans, across every repo. Nothing reaches agents until you approve it, unless the repo has auto-approve on."}
+      </Text>
+      <View style={styles.row}>
+        <Button label={tidyAll.isPending ? "Starting tidy" : `Tidy all repos (${repoKeys.length})`} disabled={tidyAll.isPending} styles={styles} onPress={() => tidyAll.mutate()} />
+      </View>
+      {tidyAll.data?.map((line) => (
+        <Text key={line} style={styles.muted}>
+          {line}
+        </Text>
+      ))}
+      {pending.map((repo) => (
+        <View key={repo.repoKey} style={{ gap: 8 }}>
+          <Text style={styles.label}>
+            {repo.repoKey} · {repo.pending}
+          </Text>
+          <Inbox where={{ repoKey: repo.repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // Memories across global and every repo that need a look, grouped by why.
 function AttentionView({ facts, styles }: { facts: ListedFact[]; styles: Styles }) {
   const groups = attentionGroups(facts);
@@ -235,10 +283,14 @@ export function ManagerScreen(props: PluginScreenProps) {
   useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise"] })), [queryClient]);
 
   const repos = useQuery({ queryKey: ["memorise", "repos"], queryFn: () => listRepos({}) });
+  const summarize = useRpc(proposalsSummaryRpc);
+  const proposals = useQuery({ queryKey: ["memorise-proposals", "summary"], queryFn: () => summarize({}) });
+  useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] })), [queryClient]);
+  const pendingTotal = (proposals.data?.repos ?? []).reduce((sum, repo) => sum + repo.pending, 0);
   const listed = repos.data?.repos ?? [];
   // The repo the screen was opened for, and the chosen one, are listed even before they have any
   // memory files, so either can be chosen again.
-  const isRepo = (key: string | undefined): key is string => !!key && key !== GLOBAL && key !== ATTENTION_VIEW && key !== SETTINGS_VIEW;
+  const isRepo = (key: string | undefined): key is string => !!key && key !== GLOBAL && key !== ATTENTION_VIEW && key !== SETTINGS_VIEW && key !== PROPOSALS_VIEW;
   const missing = [...new Set([params.repo, view])].filter((key): key is string => isRepo(key) && !listed.some((repo) => repo.repoKey === key));
   const shownRepos = [...listed, ...missing.map((key) => ({ repoKey: key, active: 0, retired: 0, lastModified: null }))];
   const all = useAllFacts(listed.map((repo) => repo.repoKey));
@@ -250,6 +302,7 @@ export function ManagerScreen(props: PluginScreenProps) {
     detail: `${repo.active} active${repo.retired > 0 ? ` · ${repo.retired} retired` : ""}${repo.lastModified ? ` · changed ${repo.lastModified.slice(0, 10)}` : ""}`,
   }));
   const manageEntries = [
+    { id: PROPOSALS_VIEW, label: "Proposals", detail: pendingTotal > 0 ? `${pendingTotal} waiting` : "none waiting" },
     { id: ATTENTION_VIEW, label: "Needs attention", detail: attentionCount > 0 ? `${attentionCount} to review` : "nothing to review" },
     { id: SETTINGS_VIEW, label: "Settings", detail: "memory, capture, tidy" },
   ];
@@ -260,7 +313,7 @@ export function ManagerScreen(props: PluginScreenProps) {
       {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
       <View style={styles.row}>
         {[...repoEntries, ...manageEntries].map((entry) => (
-          <Chip key={entry.id} label={entry.id === ATTENTION_VIEW && attentionCount > 0 ? `${entry.label} · ${attentionCount}` : entry.label} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
+          <Chip key={entry.id} label={entry.id === ATTENTION_VIEW && attentionCount > 0 ? `${entry.label} · ${attentionCount}` : entry.id === PROPOSALS_VIEW && pendingTotal > 0 ? `${entry.label} · ${pendingTotal}` : entry.label} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
         ))}
       </View>
     </View>
@@ -288,6 +341,12 @@ export function ManagerScreen(props: PluginScreenProps) {
             <Text style={styles.title}>Settings</Text>
             <MemorySettingsScreen {...props} />
           </>
+        ) : view === PROPOSALS_VIEW ? (
+          proposals.error ? (
+            <Text style={styles.danger}>{proposals.error.message}</Text>
+          ) : (
+            <ProposalsView pending={proposals.data?.repos ?? []} repoKeys={listed.flatMap((repo) => (repo.repoKey ? [repo.repoKey] : []))} styles={styles} />
+          )
         ) : view === ATTENTION_VIEW ? (
           all.error ? <Text style={styles.danger}>{all.error.message}</Text> : all.pending ? <Text style={styles.muted}>Loading memories</Text> : <AttentionView facts={all.facts} styles={styles} />
         ) : (

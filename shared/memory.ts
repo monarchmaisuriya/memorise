@@ -59,8 +59,9 @@ export const pathGlobSchema = z
   .refine((glob) => !glob.startsWith("/") && !glob.split("/").includes(".."), "A path glob is relative to the repo root, without '..'")
   .refine((glob) => !/\{[^}]*\{/.test(glob) && (glob.match(/\{/g) ?? []).length <= 1, "A path glob may use one {a,b} group at most");
 
-// Who a fact came from. "captured" means proposed from a session transcript and approved by the user.
-export const sourceKindSchema = z.enum(["agent", "user", "captured"]);
+// Who a fact came from. "captured": proposed by capture or a project scan and approved by the user.
+// "auto": the same, approved automatically because the repo has auto-approve on.
+export const sourceKindSchema = z.enum(["agent", "user", "captured", "auto"]);
 
 // When a fact reaches a new agent's index. listed: ranked as usual. files: only when the worktree
 // changed a file matching its paths. title: the subject only; the agent reads the body with
@@ -254,10 +255,13 @@ export const importMemoryRpc = defineRpc({
 // Per-repo preferences, shared by every worktree of the repo. enabled false: new agents in the repo
 // get no memory and no memory tools. includeGlobal false: the repo's agents see no global memories.
 // capture: "default" follows the host setting; "on" or "off" overrides it for this repo.
+// autoApprove: new memories from capture and project scans are saved without review. Changes to
+// saved memories (tidy, replace, retire) always wait for the user.
 export const repoPrefsSchema = z.object({
   enabled: z.boolean().default(true),
   includeGlobal: z.boolean().default(true),
   capture: z.enum(["default", "on", "off"]).default("default"),
+  autoApprove: z.boolean().default(false),
 });
 export type RepoPrefsValue = z.infer<typeof repoPrefsSchema>;
 
@@ -306,11 +310,20 @@ export const proposalSchema = z.object({
   body: bodySchema,
   paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).default([]),
   reason: z.string().trim().max(300).default(""),
-  source: z.object({ from: z.enum(["capture", "tidy"]), agentId: z.string().nullable(), provider: z.string(), model: z.string().nullable() }),
+  source: z.object({ from: z.enum(["capture", "tidy", "project"]), agentId: z.string().nullable(), provider: z.string(), model: z.string().nullable() }),
   created: z.iso.datetime(),
   hash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type Proposal = z.infer<typeof proposalSchema>;
+
+// The last tidy or project scan started for a repo, kept in memory until the plugin restarts.
+export const runStatusSchema = z.object({
+  kind: z.enum(["tidy", "scan"]),
+  state: z.enum(["running", "done", "failed"]),
+  message: z.string(),
+  at: z.string(),
+});
+export type RunStatus = z.infer<typeof runStatusSchema>;
 
 export const listProposalsRpc = defineRpc({
   name: "memory.proposals.list",
@@ -319,6 +332,7 @@ export const listProposalsRpc = defineRpc({
     repoKey: repoKeySchema.nullable(),
     proposals: z.array(proposalSchema.extend({ targetFacts: z.array(z.object({ id: factIdSchema, subject: z.string(), body: z.string() })) })),
     captureRunsToday: z.number(),
+    lastRun: runStatusSchema.nullable(),
   }),
 });
 
@@ -337,7 +351,23 @@ export const rejectProposalRpc = defineRpc({
 
 // The chat card a capture pass adds to the source agent's timeline (UI only; never sent to the model).
 export const PROPOSALS_CARD_KIND = "memorise-proposals";
-export const proposalsCardSchema = z.object({ count: z.number().int().min(1) });
+// count: proposals waiting; autoSaved: memories saved automatically (auto-approve on).
+export const proposalsCardSchema = z.object({ count: z.number().int().min(0), autoSaved: z.number().int().min(0).default(0) });
+
+// Repos with proposals waiting, for the manager's Proposals view.
+export const proposalsSummaryRpc = defineRpc({
+  name: "memory.proposals.summary",
+  input: z.object({}),
+  output: z.object({ repos: z.array(z.object({ repoKey: repoKeySchema, pending: z.number() })) }),
+});
+
+// Reads the repo's project files and proposes memories from them: "create" proposes new ones,
+// "refresh" also checks saved memories against the files. Returns at once with the checkout used.
+export const scanProjectRpc = defineRpc({
+  name: "memory.project.scan",
+  input: whereInput.extend({ mode: z.enum(["create", "refresh"]) }),
+  output: z.object({ started: z.literal(true), folder: z.string() }),
+});
 
 export const tidyMemoryRpc = defineRpc({
   name: "memory.tidy",

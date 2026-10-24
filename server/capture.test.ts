@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,6 +104,72 @@ describe("capture", () => {
   });
 
   const reply = JSON.stringify({ facts: [{ type: "gotcha", subject: "integration tests", body: "Integration tests need DOCKER_HOST set.", paths: ["scripts/**"] }] });
+
+  it("scans a project and proposes new memories marked as from the project", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev to start the API.\n");
+    const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev server", body: "Run make dev to start the API.", paths: ["Makefile"] }] }));
+    capture.remember(fake.paseo);
+    expect(await (await capture.startScan(REPO, cwd, "create")).done).toEqual({ pending: 1, autoSaved: 0 });
+    expect(capture.lastRun(REPO)).toMatchObject({ kind: "scan", state: "done", message: "1 proposed" });
+    const [proposal] = await proposals.list(REPO);
+    expect(proposal).toMatchObject({ kind: "new", subject: "dev server", source: { from: "project", provider: "claude" } });
+    expect(fake.created[0].prompt).toContain("<<<File README.md");
+    expect(fake.created[0].config.provider).toBe("claude/claude-default");
+  });
+
+  it("re-checks saved memories against the project and proposes retiring a contradicted one", async () => {
+    await writeFile(join(cwd, "README.md"), "Tests run with vitest.\n");
+    const old = await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject: "tests", body: "Tests run with jest.", supersedes: null, source: { by: "user", provider: null, branch: null, commit: null }, citations: [] });
+    const fake = fakePaseo([], JSON.stringify({ facts: [], actions: [{ action: "retire", id: old.id, reason: "README says vitest" }] }));
+    capture.remember(fake.paseo);
+    expect(await (await capture.startScan(REPO, cwd, "refresh")).done).toEqual({ pending: 1, autoSaved: 0 });
+    expect((await proposals.list(REPO))[0]).toMatchObject({ kind: "retire", targets: [old.id], reason: "README says vitest" });
+    expect(fake.created[0].prompt).toContain(`id: ${old.id}`);
+  });
+
+  it("refuses a scan at once when the daily limit is used up, without starting a worker", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    values = { ...values, captureMaxPerDay: 1 };
+    const fake = fakePaseo([], "not json");
+    capture.remember(fake.paseo);
+    await expect((await capture.startScan(REPO, cwd, "create")).done).rejects.toThrow(/reply was not valid/);
+    expect(capture.lastRun(REPO)).toMatchObject({ kind: "scan", state: "failed" });
+    await expect(capture.startScan(REPO, cwd, "create")).rejects.toThrow(/background runs are used up/);
+    expect(fake.created).toHaveLength(1);
+    expect(capture.isScanning(REPO)).toBe(false);
+  });
+
+  it("with auto mode on, never approves tidy's proposals", async () => {
+    await repoPrefs.set(REPO, { autoApprove: true });
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    const a = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "one", body: "One.", supersedes: null, source, citations: [] });
+    const b = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "two", body: "Two.", supersedes: null, source, citations: [] });
+    capture.remember(fakePaseo([], JSON.stringify({ actions: [{ action: "merge", ids: [a.id, b.id], type: "gotcha", subject: "both", body: "One and two.", reason: "duplicates" }] })).paseo);
+    expect(await (await capture.startTidy(REPO, null)).done).toBe(1);
+    expect((await proposals.list(REPO)).map((proposal) => proposal.kind)).toEqual(["merge"]);
+    expect((await store.list(REPO)).filter((fact) => !fact.superseded && fact.status === "active")).toHaveLength(2);
+  });
+
+  it("with auto mode on, saves new memories marked auto and leaves changes for review", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    const old = await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject: "old", body: "Obsolete.", supersedes: null, source: { by: "user", provider: null, branch: null, commit: null }, citations: [] });
+    const reply = { facts: [{ type: "howto", subject: "dev", body: "Run make dev.", paths: [] }], actions: [{ action: "retire", id: old.id, reason: "gone" }] };
+    capture.remember(fakePaseo([], JSON.stringify(reply)).paseo);
+    expect(await (await capture.startScan(REPO, cwd, "refresh")).done).toEqual({ pending: 1, autoSaved: 1 });
+    const saved = (await store.list(REPO)).find((fact) => fact.subject === "dev");
+    expect(saved?.source.by).toBe("auto");
+    expect((await proposals.list(REPO)).map((proposal) => proposal.kind)).toEqual(["retire"]);
+  });
+
+  it("with auto mode on, saves captured memories and says so on the chat card", async () => {
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(0);
+    expect((await store.list(REPO)).map((fact) => fact.source.by)).toEqual(["auto"]);
+    expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1 } });
+  });
 
   it("follows a repo's capture setting over the host setting", async () => {
     values = { ...values, captureEnabled: false };
@@ -270,7 +336,7 @@ describe("capture", () => {
     const tidyReply = JSON.stringify({ actions: [{ action: "merge", ids: [a.id, b.id], type: "gotcha", subject: "DOCKER_HOST for tests", body: "Set DOCKER_HOST before running tests.", reason: "duplicates" }, { action: "retire", id: "01JB8Z6X3T5Q9V2M4N7P8R1S0W", reason: "unknown id is dropped" }] });
     const fake = fakePaseo([], tidyReply);
     capture.remember(fake.paseo);
-    expect(await capture.tidyNow(REPO, null)).toBe(1);
+    expect(await (await capture.startTidy(REPO, null)).done).toBe(1);
     expect(fake.created[0].config).toMatchObject({ provider: "claude/claude-default", modeId: "plan", mcpServers: {} });
     expect(fake.created[0].config.options.disallowedTools).toEqual(expect.arrayContaining(["Bash", "Read", "WebFetch", "mcp__paseo"]));
     expect(fake.created[0].config.options.extraArgs).toEqual({ "strict-mcp-config": null });
@@ -293,12 +359,13 @@ describe("tidy limits", () => {
     for (const subject of ["one", "two"]) await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject, body: subject, supersedes: null, source, citations: [] });
     const fake = fakePaseo([], "not json");
     capture.remember(fake.paseo);
-    const first = capture.tidyNow(REPO, null);
-    await expect(capture.tidyNow(REPO, null)).rejects.toThrow(/already running/);
-    expect(await first).toBe(0);
+    const first = capture.startTidy(REPO, null);
+    await expect(capture.startTidy(REPO, null)).rejects.toThrow(/already running/);
+    await expect((await first).done).rejects.toThrow(/reply was not valid/);
+    expect(capture.lastRun(REPO)).toMatchObject({ kind: "tidy", state: "failed", message: expect.stringMatching(/reply was not valid/) });
     expect(await capture.runsToday()).toBe(1);
-    // The daily limit (shared with capture) now stops further tidy runs.
-    expect(await capture.tidyNow(REPO, null)).toBe(0);
+    // The daily limit (shared with capture) now stops further tidy runs, and says so.
+    await expect(capture.startTidy(REPO, null)).rejects.toThrow(/background runs are used up/);
     expect(fake.created).toHaveLength(1);
     capture.stop();
   });

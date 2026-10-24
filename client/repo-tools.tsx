@@ -34,6 +34,14 @@ export function RepoPrefsCard({ repoKey, styles }: { repoKey: string; styles: St
           <Chip key={value} label={value === "default" ? "Host setting" : value === "on" ? "On here" : "Off here"} on={prefs.capture === value} onPress={() => change({ capture: value })} styles={styles} />
         ))}
       </View>
+      <View style={styles.row}>
+        <Chip label={prefs.autoApprove ? "Auto-approve new memories: on" : "Auto-approve new memories: off"} on={prefs.autoApprove} onPress={() => change({ autoApprove: !prefs.autoApprove })} styles={styles} />
+      </View>
+      <Text style={styles.muted}>
+        {prefs.autoApprove
+          ? "New memories from capture and project scans are saved without review and marked auto. Tidy, rewrites, and retirements still wait for you."
+          : "Off: every proposed memory waits for your review, which keeps unhelpful memories out of agents' prompts."}
+      </Text>
       {mutation.error && <Text style={styles.danger}>{mutation.error.message}</Text>}
     </View>
   );

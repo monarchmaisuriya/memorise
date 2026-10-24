@@ -4,6 +4,22 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-24
+
+### Added
+
+- Memories from a project: "Create from project" proposes memories from the repository's README, contributing guide, docs, and build files; "Re-check against project" also proposes rewriting or retiring saved memories those files contradict. The plugin reads a fixed list of files from the repository root, under size limits, never through a symlink or a hard link, with secret-shaped text replaced; the instruction files (AGENTS.md, CLAUDE.md) are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of the repository that is open as a Paseo workspace.
+- A Proposals view in the manager: every repository's waiting proposals in one place, and "Tidy all repos".
+- "Approve all" and "Reject all" for a repository's proposals; each asks once, then decides exactly the proposals shown when asked.
+- A per-repository "Auto-approve new memories" switch, off by default. On, new memories from capture or a project scan are saved without review and marked "auto"; rewrites, retirements, and tidy's proposals still wait for you.
+- The Proposed tab shows how the last tidy or project scan went (running, finished with counts, or failed with the reason) and refreshes itself while one runs.
+
+### Changed
+
+- A tidy or project scan that cannot start (the daily limit is used up, fewer than 2 memories to tidy, no project files) now says so when you press the button, instead of starting nothing; a tidy whose worker reply is not valid is reported as failed.
+- Project scans share the daily limit of background runs with capture and tidy.
+- The chat card after a capture also says how many memories were saved automatically.
+
 ## [0.3.0] - 2026-10-24
 
 ### Added
@@ -64,7 +80,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.4.0
 [0.3.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.3.0
 [0.2.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.1
 [0.2.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.0

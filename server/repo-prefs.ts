@@ -28,7 +28,8 @@ export class RepoPrefs {
     return repoPrefsSchema.parse((await this.readAll())[repoKeySchema.parse(repoKey)] ?? {});
   }
 
-  set(repoKey: string, prefs: RepoPrefsValue): Promise<RepoPrefsValue> {
+  // Fields left out take their defaults (for example autoApprove: false).
+  set(repoKey: string, prefs: z.input<typeof repoPrefsSchema>): Promise<RepoPrefsValue> {
     const next = this.queue.then(async () => {
       const all = await this.readAll();
       all[repoKeySchema.parse(repoKey)] = repoPrefsSchema.parse(prefs);

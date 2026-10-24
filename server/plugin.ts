@@ -19,11 +19,13 @@ import {
   moveMemoryRpc,
   pinMemoryRpc,
   previewMemoryRpc,
+  proposalsSummaryRpc,
   rejectProposalRpc,
   restoreMemoryRpc,
   retireMemoryRpc,
   revertMemoryRpc,
   saveMemoryRpc,
+  scanProjectRpc,
   searchMemoriesRpc,
   setRepoPrefsRpc,
   tidyMemoryRpc,
@@ -36,6 +38,7 @@ import { buildMemorySection, INDEX_MAX_BYTES, withMemorySection, withoutMemorySe
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
+import type { PaseoApi } from "./paseo-types";
 import { supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
 import { RepoPrefs } from "./repo-prefs";
@@ -355,7 +358,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(listProposalsRpc, async ({ where }) => {
     const [{ store, proposals, capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (!repoKey) return { repoKey, proposals: [], captureRunsToday: await capture.runsToday() };
+    if (!repoKey) return { repoKey, proposals: [], captureRunsToday: await capture.runsToday(), lastRun: null };
     const facts = new Map((await store.list(repoKey)).map((fact) => [fact.id, fact]));
     const pending = (await proposals.list(repoKey)).map((proposal) => ({
       ...proposal,
@@ -364,7 +367,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
         return fact ? [{ id, subject: fact.subject, body: fact.body }] : [];
       }),
     }));
-    return { repoKey, proposals: pending, captureRunsToday: await capture.runsToday() };
+    return { repoKey, proposals: pending, captureRunsToday: await capture.runsToday(), lastRun: capture.lastRun(repoKey) };
   });
 
   server.handle(approveProposalRpc, async ({ where, id, subject, body, paths }) => {
@@ -381,15 +384,52 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { rejected: true as const };
   });
 
-  // Starts a tidy pass and returns at once; its proposals appear in the inbox when it finishes.
-  // With a workspace folder, tidy also checks citations against that checkout.
+  server.handle(proposalsSummaryRpc, async () => ({ repos: await (await runtime).proposals.summary() }));
+
+  // A checkout to read for a project scan: the given workspace folder, or the folder of an open
+  // workspace that belongs to the repo.
+  async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
+    if ("directory" in where) {
+      const repoKey = await readRepoKey(where.directory);
+      if (!repoKey) throw new Error("This folder is not in a git repo, so there is no project to read.");
+      return { repoKey, folder: where.directory };
+    }
+    if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
+    // Every page of workspaces; a project's main checkout is preferred over a worktree of a branch.
+    let cursor: string | undefined;
+    do {
+      const { entries, pageInfo } = await paseo.workspaces.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+      for (const workspace of entries) {
+        for (const folder of [workspace.projectRootPath, workspace.workspaceDirectory]) {
+          if (folder && (await readRepoKey(folder).catch(() => null)) === where.repoKey) return { repoKey: where.repoKey, folder };
+        }
+      }
+      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
+    } while (cursor);
+    throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
+  }
+
+  // Starts a project scan and returns at once; its proposals appear in the inbox when it finishes.
+  server.handle(scanProjectRpc, async ({ where, mode }, { paseo }) => {
+    const { capture } = await runtime;
+    capture.remember(paseo);
+    const { repoKey, folder } = await checkoutFor(where, paseo);
+    if (capture.isScanning(repoKey)) throw new Error("A project scan of this repo is already running; its proposals will appear here.");
+    const { done } = await capture.startScan(repoKey, folder, mode);
+    void done.catch((error: unknown) => console.error(`[memorise] project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
+    return { started: true as const, folder };
+  });
+
+  // Starts a tidy pass and returns at once; its proposals appear in the inbox when it finishes. With a
+  // workspace folder, tidy also checks citations against that checkout.
   server.handle(tidyMemoryRpc, async ({ where }, { paseo }) => {
     const [{ capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     if (!repoKey) throw new Error("Tidy works on one repo's memory; choose a repo.");
     const directory = "directory" in where ? where.directory : null;
     if (capture.isTidying(repoKey)) throw new Error("A tidy of this repo's memory is already running; its proposals will appear here.");
     capture.remember(paseo);
-    void capture.tidyNow(repoKey, directory).catch((error: unknown) => console.error(`[memorise] tidy of ${repoKey} failed: ${String(error)}`));
+    const { done } = await capture.startTidy(repoKey, directory);
+    void done.catch((error: unknown) => console.error(`[memorise] tidy of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
     return { started: true as const };
   });
 
