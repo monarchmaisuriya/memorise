@@ -201,7 +201,8 @@ export const listReposRpc = defineRpc({
   name: "memory.repos",
   input: z.object({}),
   output: z.object({
-    repos: z.array(z.object({ repoKey: repoKeySchema.nullable(), active: z.number(), retired: z.number(), lastModified: z.string().nullable() })),
+    // label: a folder project's current folder name; null for global and git repos.
+    repos: z.array(z.object({ repoKey: repoKeySchema.nullable(), active: z.number(), retired: z.number(), lastModified: z.string().nullable(), label: z.string().nullable().default(null) })),
   }),
 });
 

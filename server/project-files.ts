@@ -1,6 +1,5 @@
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { projectRoot } from "./repo-key";
 import { redactSecrets } from "./secrets";
 
 export const MAX_FILE_BYTES = 8 * 1024;
@@ -62,11 +61,12 @@ async function namesMatching(dir: string, pattern: RegExp): Promise<string[]> {
   return (await readdir(dir).catch(() => [] as string[])).filter((name) => pattern.test(name)).sort();
 }
 
-// The fixed list of project files a scan reads, under per-file and total caps, with secret-shaped
+// The fixed list of project files a scan reads from a project root (see ProjectKeys), under per-file and total caps, with secret-shaped
 // text removed. Instruction files and manifests come first, as they are short and the scan needs them
 // most; a file that would pass the total cap is left out and the smaller ones after it still fit.
-export async function readProjectFiles(cwd: string): Promise<ProjectFile[]> {
-  const root = await projectRoot(cwd);
+export async function readProjectFiles(projectRoot: string): Promise<ProjectFile[]> {
+  // Real, so the inside-the-root check compares real paths with real paths.
+  const root = await realpath(projectRoot);
   const readme = (await namesMatching(root, /^readme(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
   const contributing = (await namesMatching(root, /^contributing(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
   const docs = (await namesMatching(join(root, "docs"), DOC_NAME)).slice(0, MAX_DOCS).map((name) => `docs/${name}`);

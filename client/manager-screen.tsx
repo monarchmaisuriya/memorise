@@ -292,14 +292,14 @@ export function ManagerScreen(props: PluginScreenProps) {
   // memory files, so either can be chosen again.
   const isRepo = (key: string | undefined): key is string => !!key && key !== GLOBAL && key !== ATTENTION_VIEW && key !== SETTINGS_VIEW && key !== PROPOSALS_VIEW;
   const missing = [...new Set([params.repo, view])].filter((key): key is string => isRepo(key) && !listed.some((repo) => repo.repoKey === key));
-  const shownRepos = [...listed, ...missing.map((key) => ({ repoKey: key, active: 0, retired: 0, lastModified: null }))];
+  const shownRepos = [...listed, ...missing.map((key) => ({ repoKey: key, active: 0, retired: 0, lastModified: null, label: null }))];
   // Repos listed only for an open workspace or proposals have no memories to load or tidy.
   const all = useAllFacts(listed.filter((repo) => repo.repoKey === null || repo.active + repo.retired > 0).map((repo) => repo.repoKey));
   const attentionCount = Object.values(attentionGroups(all.facts)).reduce((sum, items) => sum + (items?.length ?? 0), 0);
 
   const repoEntries = shownRepos.map((repo) => ({
     id: repo.repoKey ?? GLOBAL,
-    label: repo.repoKey ?? "Global (every repo)",
+    label: repo.label ? `${repo.label} (folder)` : (repo.repoKey ?? "Global (every repo)"),
     detail: `${repo.active} active${repo.retired > 0 ? ` · ${repo.retired} retired` : ""}${repo.lastModified ? ` · changed ${repo.lastModified.slice(0, 10)}` : ""}`,
   }));
   const manageEntries = [

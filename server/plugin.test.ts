@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type MemorySettings, memorySettings, updateMemoryRpc } from "../shared/memory";
@@ -138,6 +138,11 @@ describe("memorise server entry", () => {
     errors.mockRestore();
     expect(config.systemPrompt).toContain("notes: Drafts live in drafts/.");
     expect(Object.keys(config.mcpServers)).toEqual(["paseo-memorise", "paseo-memorise-write"]);
+    // A workspace's folder is a project root, so an agent in a subfolder gets the same memories.
+    await fake.workspaceCreated(plain);
+    const sub = join(plain, "drafts");
+    await mkdir(sub);
+    await vi.waitFor(async () => expect((await fake.create({ provider: "claude", cwd: sub })).config.systemPrompt).toContain("notes: Drafts live in drafts/."));
     await expect(fake.call("memory.save", { where: { directory: plain }, scope: "global", type: "howto", subject: "x", body: "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789" })).rejects.toThrow(/GitHub token/);
   });
 
@@ -428,12 +433,12 @@ describe("memorise server entry", () => {
     await new ProposalStore(root).add([{ repoKey: "github.com/acme/docs", kind: "new", targets: [], type: "howto", subject: "docs", body: "Docs build with mkdocs.", paths: [], reason: "", source }], []);
     const { repos } = await fake.call("memory.repos", {});
     expect(repos).toEqual([
-      { repoKey: null, active: 0, retired: 0, lastModified: null },
-      // A workspace folder outside git is a project of its own.
-      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null },
-      { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String) },
-      { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null },
-      { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null },
+      { repoKey: null, active: 0, retired: 0, lastModified: null, label: null },
+      // A workspace folder outside git is a project of its own, shown by its folder's name.
+      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null, label: basename(notGit) },
+      { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String), label: null },
+      { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null, label: null },
+      { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null, label: null },
     ]);
   });
 });

@@ -7,9 +7,9 @@ import { checkCitations } from "./citations";
 import { buildCapturePrompt, buildProjectPrompt, buildTidyPrompt, CAPTURE_OUTPUT_SCHEMA, parseCandidates, parseProjectReply, parseTidyActions, projectOutputSchema, type ScanMode, TIDY_OUTPUT_SCHEMA } from "./extractor";
 import type { PaseoApi } from "./paseo-types";
 import { type ProjectFile, readProjectFiles } from "./project-files";
+import type { ProjectKeys } from "./project-keys";
 import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
-import { readRepoKey } from "./repo-key";
 import type { RepoPrefs } from "./repo-prefs";
 import type { MemoryStore } from "./store";
 import { sliceTranscript } from "./transcript";
@@ -50,6 +50,7 @@ export interface CaptureDeps {
   proposals: ProposalStore;
   usage: UsageLog;
   repoPrefs: RepoPrefs;
+  keys: ProjectKeys;
   settings(): Promise<MemorySettings>;
 }
 
@@ -194,7 +195,7 @@ export class Capture {
     this.remember(paseo);
     if (this.isWorker(agent.id, agent.cwd) || !supportedProvider(agent.provider)) return;
     const values = await this.deps.settings();
-    const repoKey = await readRepoKey(agent.cwd).catch(() => null);
+    const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
     if (!repoKey || !(await this.captureOn(values, repoKey))) return;
     clearTimeout(this.timers.get(agent.id));
     this.timers.set(
@@ -265,7 +266,7 @@ export class Capture {
       const paseo = this.paseo;
       if (!paseo) throw new Error("The plugin has not seen Paseo yet; open an agent and try again");
       const values = await this.deps.settings();
-      const files = await readProjectFiles(cwd);
+      const files = await readProjectFiles((await this.deps.keys.resolve(cwd)).root);
       if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
       await this.requireRun(`project scan of ${repoKey}`, values.captureMaxPerDay);
       const startedAt = new Date().toISOString();
@@ -341,7 +342,7 @@ export class Capture {
       // A model id belongs to one provider, so it applies only when one provider reads every session.
       const model = values.captureProvider === "session" ? "" : values.captureModel;
       if (!provider) return 0;
-      const repoKey = await readRepoKey(agent.cwd).catch(() => null);
+      const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
       // Captured memories belong to a repo; global memories come only from the user.
       if (!repoKey || !(await this.captureOn(values, repoKey))) return 0;
       const previous = (await this.readState()).agents[agent.id];
@@ -537,7 +538,7 @@ export class Capture {
     const paseo = this.paseo;
     if (!paseo || (await this.deps.settings()).projectAutoScan === "off") return [];
     const scanned: string[] = [];
-    for (const [repoKey, folder] of await openRepoCheckouts(paseo, this.deps.root)) {
+    for (const [repoKey, folder] of await openRepoCheckouts(paseo, this.deps.root, this.deps.keys)) {
       if (await this.scanIfDue(repoKey, folder)) scanned.push(repoKey);
     }
     return scanned;
