@@ -5,11 +5,11 @@ export const MAX_SUBJECT_CHARS = 80;
 export const MAX_BODY_CHARS = 1_000;
 export const MAX_CITATIONS = 10;
 
-// Saved text is later placed inside the <agent-memory> section of other agents' system prompts. It
+// Saved text is later placed inside the <memorise> section of other agents' system prompts. It
 // must not be able to start a new index line or close that section.
-const MEMORY_TAG = /<\s*\/?\s*agent-memory/i;
+const MEMORY_TAG = /<\s*\/?\s*memorise/i;
 const noMemoryTag = (text: string) => !MEMORY_TAG.test(text);
-const TAG_MESSAGE = "A memory cannot contain an <agent-memory> tag";
+const TAG_MESSAGE = "A memory cannot contain a <memorise> tag";
 
 export const subjectSchema = z
   .string()
@@ -195,7 +195,7 @@ export const rejectProposalRpc = defineRpc({
 });
 
 // The chat card a capture pass adds to the source agent's timeline (UI only; never sent to the model).
-export const PROPOSALS_CARD_KIND = "agent-memory-proposals";
+export const PROPOSALS_CARD_KIND = "memorise-proposals";
 export const proposalsCardSchema = z.object({ count: z.number().int().min(1) });
 
 export const tidyMemoryRpc = defineRpc({

@@ -76,12 +76,12 @@ export function Inbox({ directory, styles, onChanged }: { directory: string; sty
   const tidy = useRpc(tidyMemoryRpc);
   const settings = useSettings(memorySettings);
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["agent-memory-proposals", directory], queryFn: () => list({ directory }) });
+  const query = useQuery({ queryKey: ["memorise-proposals", directory], queryFn: () => list({ directory }) });
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ["agent-memory-proposals", directory] });
+    void queryClient.invalidateQueries({ queryKey: ["memorise-proposals", directory] });
     onChanged();
   };
-  useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["agent-memory-proposals"] })), [queryClient]);
+  useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] })), [queryClient]);
   const tidyRun = useMutation({ mutationFn: () => tidy({ directory }) });
 
   if (query.isPending) return <Text style={styles.muted}>Loading proposals</Text>;
@@ -92,7 +92,7 @@ export function Inbox({ directory, styles, onChanged }: { directory: string; sty
       <Text style={styles.muted}>
         {captureOn
           ? `Capture is on: finished sessions propose memories here. Runs today: ${query.data.captureRunsToday}.`
-          : "Capture is off. Turn it on in Settings > Plugins > Agent memory to have finished sessions propose memories."}
+          : "Capture is off. Turn it on in Settings > Plugins > Memorise to have finished sessions propose memories."}
       </Text>
       <View style={styles.row}>
         <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} styles={styles} onPress={() => tidyRun.mutate()} />

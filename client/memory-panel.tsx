@@ -114,9 +114,9 @@ export function MemoryPanel({ theme, layout, workspaceId }: PluginWorkspacePanel
   const [tab, setTab] = useState<"memories" | "proposed">("memories");
   const [filter, setFilter] = useState<Filter>("all");
   const [showHistory, setShowHistory] = useState(false);
-  const query = useQuery({ queryKey: ["agent-memory", directory], queryFn: () => list({ directory: directory ?? "" }), enabled: directory !== null });
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["agent-memory", directory] });
-  useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["agent-memory"] })), [queryClient]);
+  const query = useQuery({ queryKey: ["memorise", directory], queryFn: () => list({ directory: directory ?? "" }), enabled: directory !== null });
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["memorise", directory] });
+  useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise"] })), [queryClient]);
 
   if (directory === null || query.isPending) return <View style={[styles.screen, styles.content]}><Text style={styles.muted}>Loading memories</Text></View>;
   if (query.error) return <View style={[styles.screen, styles.content]}><Text style={styles.danger}>{query.error.message}</Text></View>;
@@ -125,7 +125,7 @@ export function MemoryPanel({ theme, layout, workspaceId }: PluginWorkspacePanel
   const shown = facts.filter((fact) => (filter === "all" || fact.scope === filter) && (showHistory || (fact.status === "active" && !fact.superseded)));
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Agent memory</Text>
+      <Text style={styles.title}>Memorise</Text>
       <Text style={styles.muted}>{repoKey ? `Repo ${repoKey}, plus global memories. Shared by every workspace of this repo.` : "This folder is not in a git repo; only global memories apply."}</Text>
       <View style={styles.row}>
         <Chip label="Memories" on={tab === "memories"} onPress={() => setTab("memories")} styles={styles} />

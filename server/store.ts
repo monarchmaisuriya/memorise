@@ -64,7 +64,7 @@ export class MemoryStore {
         facts.push(parseFact(await readFile(path, "utf8")));
       } catch (error) {
         // One hand-edited file with a mistake must not hide every other memory; it is reported instead.
-        console.error(`[agent-memory] skipped unreadable memory file ${path}: ${String(error)}`);
+        console.error(`[memorise] skipped unreadable memory file ${path}: ${String(error)}`);
       }
     }
     return facts;

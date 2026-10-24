@@ -2,13 +2,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { memorySettings, type MemorySettings } from "../shared/memory";
 import { Capture } from "./capture";
 import { buildCapturePrompt, parseCandidates, parseTidyActions } from "./extractor";
+import type { AgentTimelineItem, PaseoApi } from "./paseo-types";
 import { ProposalStore, proposalHash } from "./proposals";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -193,7 +192,7 @@ describe("capture", () => {
     const pending = await proposals.list(REPO);
     expect(pending).toMatchObject([{ kind: "new", subject: "integration tests", paths: ["scripts/**"], source: { from: "capture", agentId: "agent-1", provider: "codex" } }]);
     expect(await store.list(REPO)).toEqual([]);
-    expect(fake.appended[0]).toMatchObject({ type: "plugin", kind: "agent-memory-proposals", data: { count: 1 } });
+    expect(fake.appended[0]).toMatchObject({ type: "plugin", kind: "memorise-proposals", data: { count: 1 } });
   });
 
   it("ignores the model setting when each session is read by its own provider", async () => {

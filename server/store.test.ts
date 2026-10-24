@@ -24,7 +24,7 @@ function repoFact(body: string, overrides: Partial<NewFact> = {}): NewFact {
 describe("MemoryStore", () => {
   let store: MemoryStore;
   beforeEach(async () => {
-    store = new MemoryStore(tempDir("agent-memory-"));
+    store = new MemoryStore(tempDir("memorise-"));
   });
 
   it("creates sortable ids", () => {

@@ -41,7 +41,7 @@ async function repoWithOrigin(origin: string): Promise<string> {
 const defaults: MemorySettings = { ...memorySettings.schema.parse({}), mcpPort: 0 };
 const other = { excalidraw: { type: "stdio", command: "excalidraw" } };
 
-describe("agent-memory server entry", () => {
+describe("memorise server entry", () => {
   let cleanup: () => unknown;
   let root: string;
   beforeEach(async () => {
@@ -62,10 +62,10 @@ describe("agent-memory server entry", () => {
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
     await fake.call("memory.save", { directory: cwd, scope: "global", type: "preference", subject: "commits", body: "Ask before running git commit." });
     const { config } = await fake.create({ provider: "claude", cwd, systemPrompt: "Be brief.", mcpServers: other });
-    expect(config.systemPrompt).toMatch(/^Be brief\.\n\n<agent-memory>/);
+    expect(config.systemPrompt).toMatch(/^Be brief\.\n\n<memorise>/);
     expect(config.systemPrompt).toContain("preference (global): commits: Ask before running git commit.");
-    expect(Object.keys(config.mcpServers).sort()).toEqual(["excalidraw", "paseo-agent-memory", "paseo-agent-memory-write"]);
-    expect(config.mcpServers["paseo-agent-memory"].headers.Authorization).toMatch(/^Bearer /);
+    expect(Object.keys(config.mcpServers).sort()).toEqual(["excalidraw", "paseo-memorise", "paseo-memorise-write"]);
+    expect(config.mcpServers["paseo-memorise"].headers.Authorization).toMatch(/^Bearer /);
   });
 
   it("re-scopes a child agent instead of keeping its parent's section and token", async () => {
@@ -74,9 +74,9 @@ describe("agent-memory server entry", () => {
     const childCwd = await repoWithOrigin("git@github.com:acme/web.git");
     const parent = (await fake.create({ provider: "codex", cwd: parentCwd, mcpServers: other })).config;
     const child = (await fake.create({ ...parent, provider: "opencode", cwd: childCwd })).config;
-    expect(child.systemPrompt.match(/<agent-memory>/g)).toHaveLength(1);
+    expect(child.systemPrompt.match(/<memorise>/g)).toHaveLength(1);
     expect(child.systemPrompt).toContain("github.com/acme/web");
-    expect(child.mcpServers["paseo-agent-memory"].headers.Authorization).not.toBe(parent.mcpServers["paseo-agent-memory"].headers.Authorization);
+    expect(child.mcpServers["paseo-memorise"].headers.Authorization).not.toBe(parent.mcpServers["paseo-memorise"].headers.Authorization);
   });
 
   it("adds nothing and strips inherited memory when turned off or for other providers", async () => {
@@ -96,19 +96,19 @@ describe("agent-memory server entry", () => {
 
   it("approves reads for Claude and Codex but never writes", async () => {
     const fake = start();
-    await fake.permission({ id: "r1", name: "mcp__paseo-agent-memory__memory_search" });
-    await fake.permission({ id: "r2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-agent-memory" } });
-    await fake.permission({ id: "w1", name: "mcp__paseo-agent-memory-write__memory_write" });
-    await fake.permission({ id: "w2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-agent-memory-write" } });
+    await fake.permission({ id: "r1", name: "mcp__paseo-memorise__memory_search" });
+    await fake.permission({ id: "r2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-memorise" } });
+    await fake.permission({ id: "w1", name: "mcp__paseo-memorise-write__memory_write" });
+    await fake.permission({ id: "w2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-memorise-write" } });
     // A user's own server that happens to use the old, generic name is never approved.
-    await fake.permission({ id: "u1", name: "mcp__agent-memory__delete_everything" });
-    await fake.permission({ id: "u2", name: "CodexMcpElicitation", metadata: { serverName: "agent-memory" } });
+    await fake.permission({ id: "u1", name: "mcp__memorise__delete_everything" });
+    await fake.permission({ id: "u2", name: "CodexMcpElicitation", metadata: { serverName: "memorise" } });
     expect(fake.respondToPermission.mock.calls.map(([call]) => call.requestId)).toEqual(["r1", "r2"]);
   });
 
   it("asks for every read when automatic read approval is off", async () => {
     const fake = start({ ...defaults, autoApproveReads: false });
-    await fake.permission({ id: "r1", name: "mcp__paseo-agent-memory__memory_read" });
+    await fake.permission({ id: "r1", name: "mcp__paseo-memorise__memory_read" });
     expect(fake.respondToPermission).not.toHaveBeenCalled();
   });
 
@@ -117,14 +117,6 @@ describe("agent-memory server entry", () => {
     const plain = tempDir("plain-");
     await expect(fake.call("memory.save", { directory: plain, scope: "repo", type: "howto", subject: "x", body: "y" })).rejects.toThrow(/not in a git repo/);
     await expect(fake.call("memory.save", { directory: plain, scope: "global", type: "howto", subject: "x", body: "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789" })).rejects.toThrow(/GitHub token/);
-  });
-
-  it("drops memory servers stored under the old names when re-creating from an older agent", async () => {
-    const fake = start();
-    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
-    const legacy = { "agent-memory": { type: "http", url: "http://127.0.0.1:6790/mcp/read" }, "agent-memory-write": { type: "http", url: "http://127.0.0.1:6790/mcp/write" } };
-    const { config } = await fake.create({ provider: "claude", cwd, mcpServers: { ...other, ...legacy } });
-    expect(Object.keys(config.mcpServers).sort()).toEqual(["excalidraw", "paseo-agent-memory", "paseo-agent-memory-write"]);
   });
 
   it("still creates the agent, with the problem named, when settings cannot be read", async () => {
@@ -151,7 +143,7 @@ describe("agent-memory server entry", () => {
     const fake = start();
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
     await fake.call("memory.save", { directory: cwd, scope: "global", type: "preference", subject: "commits", body: "Ask before committing." });
-    const byMarker = (await fake.create({ provider: "codex", cwd, systemPrompt: "Extract facts.", mcpServers: other }, { AGENT_MEMORY_ROLE: "worker" })).config;
+    const byMarker = (await fake.create({ provider: "codex", cwd, systemPrompt: "Extract facts.", mcpServers: other }, { MEMORISE_ROLE: "worker" })).config;
     expect(byMarker.systemPrompt).toBe("Extract facts.");
     expect(Object.keys(byMarker.mcpServers)).toEqual(["excalidraw"]);
     const byFolder = (await fake.create({ provider: "claude", cwd: join(root, "workers", "run-1"), systemPrompt: "Tidy." })).config;

@@ -19,7 +19,7 @@ const { MemoryStore } = await import("./store");
 
 describe("an interrupted delete", () => {
   it("never makes a replaced version current again", async () => {
-    const store = new MemoryStore(tempDir("agent-memory-"));
+    const store = new MemoryStore(tempDir("memorise-"));
     const source = { by: "user" as const, provider: null, branch: null, commit: null };
     const v1 = await store.create({ scope: "repo", repoKey: "github.com/acme/api", type: "howto", subject: "s", body: "v1", supersedes: null, source, citations: [] });
     const v2 = await store.supersede(v1.id, "github.com/acme/api", { body: "v2" });

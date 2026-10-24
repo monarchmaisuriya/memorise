@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
+import type { AgentTimelineItem } from "./paseo-types";
 import { redactSecrets } from "./secrets";
 
 export const TRANSCRIPT_MAX_BYTES = 40 * 1024;

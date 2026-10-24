@@ -1,11 +1,11 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import { type FactListItem, type MemorySettings, PROPOSALS_CARD_KIND } from "../shared/memory";
 import { checkCitations } from "./citations";
 import { buildCapturePrompt, buildTidyPrompt, CAPTURE_OUTPUT_SCHEMA, parseCandidates, parseTidyActions, TIDY_OUTPUT_SCHEMA } from "./extractor";
+import type { PaseoApi } from "./paseo-types";
 import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
 import { readRepoKey } from "./repo-key";
@@ -71,7 +71,7 @@ export class Capture {
     this.paseo = paseo;
     if (this.swept) return;
     this.swept = true;
-    void this.sweepLeftoverWorkers(paseo).catch((error: unknown) => console.error(`[agent-memory] could not remove leftover workers: ${String(error)}`));
+    void this.sweepLeftoverWorkers(paseo).catch((error: unknown) => console.error(`[memorise] could not remove leftover workers: ${String(error)}`));
   }
 
   private async sweepLeftoverWorkers(paseo: PaseoApi): Promise<void> {
@@ -94,7 +94,7 @@ export class Capture {
     return this.serializeState((state) => {
       if (state.day.date !== today()) state.day = { date: today(), runs: 0 };
       if (state.day.runs >= limit) {
-        console.log(`[agent-memory] ${label} skipped: ${state.day.runs} background runs today reached the daily limit`);
+        console.log(`[memorise] ${label} skipped: ${state.day.runs} background runs today reached the daily limit`);
         return false;
       }
       state.day.runs += 1;
@@ -178,7 +178,7 @@ export class Capture {
       agent.id,
       setTimeout(() => {
         this.timers.delete(agent.id);
-        void this.captureNow(agent).catch((error: unknown) => console.error(`[agent-memory] capture for agent ${agent.id} failed: ${String(error)}`));
+        void this.captureNow(agent).catch((error: unknown) => console.error(`[memorise] capture for agent ${agent.id} failed: ${String(error)}`));
       }, values.captureIdleMinutes * MINUTE_MS),
     );
   }
@@ -203,7 +203,7 @@ export class Capture {
       const slice = sliceTranscript(fresh.entries.map((entry) => entry.item));
       // Too little new conversation yet: the cursor stays, so later turns add up until there is enough.
       if (slice.userMessages < values.captureMinUserMessages) {
-        console.log(`[agent-memory] capture for agent ${agent.id} waits: ${slice.userMessages} new user message(s) since the last capture, needs ${values.captureMinUserMessages}`);
+        console.log(`[memorise] capture for agent ${agent.id} waits: ${slice.userMessages} new user message(s) since the last capture, needs ${values.captureMinUserMessages}`);
         return 0;
       }
       // The run counts against the daily limit as soon as it starts (each attempt costs a model call).
@@ -216,7 +216,7 @@ export class Capture {
         {
           provider,
           model,
-          title: "agent-memory: capture",
+          title: "memorise: capture",
           prompt: buildCapturePrompt({ repoKey, transcript: slice.text, existingSubjects: current.map((fact) => fact.subject).slice(0, 100), instructions: values.captureInstructions, exclusions: values.captureExclusions }),
           outputSchema: CAPTURE_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
           timeoutMs: WORKER_TIMEOUT_MS,
@@ -231,7 +231,7 @@ export class Capture {
         candidates = parseCandidates(extractJson(reply));
       } catch (error) {
         await this.saveCursor(agent.id, cursor);
-        console.error(`[agent-memory] capture for agent ${agent.id}: the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); these turns are skipped`);
+        console.error(`[memorise] capture for agent ${agent.id}: the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); these turns are skipped`);
         return 0;
       }
       const added = await this.deps.proposals.add(
@@ -256,7 +256,7 @@ export class Capture {
         await paseo.agents
           .ref(agent.id)
           .timeline.append({ type: "plugin", id: PROPOSALS_CARD_KIND, kind: PROPOSALS_CARD_KIND, version: 1, data: { count: added.length } })
-          .catch((error: unknown) => console.error(`[agent-memory] could not add the proposals card: ${String(error)}`));
+          .catch((error: unknown) => console.error(`[memorise] could not add the proposals card: ${String(error)}`));
       }
       return added.length;
     } finally {
@@ -301,7 +301,7 @@ export class Capture {
     const reply = await runWorker(
       paseo,
       this.deps.root,
-      { provider, model: values.tidyModel, title: "agent-memory: tidy", prompt: buildTidyPrompt(repoKey, listed), outputSchema: TIDY_OUTPUT_SCHEMA as unknown as Record<string, unknown>, timeoutMs: WORKER_TIMEOUT_MS },
+      { provider, model: values.tidyModel, title: "memorise: tidy", prompt: buildTidyPrompt(repoKey, listed), outputSchema: TIDY_OUTPUT_SCHEMA as unknown as Record<string, unknown>, timeoutMs: WORKER_TIMEOUT_MS },
       (id) => this.trackWorker(id),
     );
     const byId = new Map(facts.map((fact) => [fact.id, fact]));
@@ -309,7 +309,7 @@ export class Capture {
     try {
       actions = parseTidyActions(extractJson(reply), new Set(byId.keys()));
     } catch (error) {
-      console.error(`[agent-memory] tidy of ${repoKey}: the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing proposed`);
+      console.error(`[memorise] tidy of ${repoKey}: the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing proposed`);
       return 0;
     }
     const source = { from: "tidy" as const, agentId: null, provider, model: values.tidyModel || null };
@@ -333,7 +333,7 @@ export class Capture {
         for (const repoKey of await repoKeys()) {
           const last = state.tidiedAt[repoKey];
           if (last && Date.now() - Date.parse(last) < TIDY_INTERVAL_MS) continue;
-          await this.tidyNow(repoKey, null).catch((error: unknown) => console.error(`[agent-memory] weekly tidy of ${repoKey} failed: ${String(error)}`));
+          await this.tidyNow(repoKey, null).catch((error: unknown) => console.error(`[memorise] weekly tidy of ${repoKey} failed: ${String(error)}`));
         }
       })();
     }, 60 * MINUTE_MS);

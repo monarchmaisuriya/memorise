@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoApi } from "./paseo-types";
 import type { Provider } from "./providers";
 import { newFactId } from "./store";
 
@@ -8,7 +8,7 @@ import { newFactId } from "./store";
 // runs with its provider's tools switched off through provider options, in a restricted mode, in an
 // empty folder of its own, and the plugin denies every permission request a worker raises. Workers
 // never get memory themselves, and their own turns are never captured.
-export const WORKER_ENV = "AGENT_MEMORY_ROLE";
+export const WORKER_ENV = "MEMORISE_ROLE";
 export const WORKER_ROLE = "worker";
 
 const RESTRICTED_MODES: Record<Provider, string> = { claude: "plan", codex: "auto", opencode: "plan" };
@@ -63,7 +63,7 @@ export async function resolveModel(paseo: PaseoApi, provider: Provider, model: s
   if (model) return `${provider}/${model}`;
   const { models } = await paseo.providers.listModels(provider);
   const chosen = models?.find((candidate) => candidate.isDefault) ?? models?.[0];
-  if (!chosen) throw new Error(`Paseo lists no models for ${provider}; set a model in Settings > Plugins > Agent memory`);
+  if (!chosen) throw new Error(`Paseo lists no models for ${provider}; set a model in Settings > Plugins > Memorise`);
   return `${provider}/${chosen.id}`;
 }
 
@@ -105,8 +105,8 @@ export async function runWorker(paseo: PaseoApi, root: string, job: WorkerJob, o
     }
   } finally {
     const workspaceId = handle?.workspaceId ?? null;
-    await handle?.archive().catch((error: unknown) => console.error(`[agent-memory] could not archive worker ${handle?.id}: ${String(error)}`));
-    if (workspaceId) await paseo.workspaces.archive(workspaceId).catch((error: unknown) => console.error(`[agent-memory] could not archive worker workspace ${workspaceId}: ${String(error)}`));
+    await handle?.archive().catch((error: unknown) => console.error(`[memorise] could not archive worker ${handle?.id}: ${String(error)}`));
+    if (workspaceId) await paseo.workspaces.archive(workspaceId).catch((error: unknown) => console.error(`[memorise] could not archive worker workspace ${workspaceId}: ${String(error)}`));
     await rm(cwd, { recursive: true, force: true });
   }
 }

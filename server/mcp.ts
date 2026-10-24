@@ -15,10 +15,8 @@ import { isVisibleToAgents, orderForAgents } from "./visibility";
 import { factMatchesFiles } from "./work-files";
 
 // Distinctive names: read requests are approved by server name, so a user's own server must not share it.
-export const READ_SERVER = "paseo-agent-memory";
-export const WRITE_SERVER = "paseo-agent-memory-write";
-// Names used before the rename; stored agent configs can still carry them, so the hook strips them too.
-export const LEGACY_SERVER_NAMES = ["agent-memory", "agent-memory-write"] as const;
+export const READ_SERVER = "paseo-memorise";
+export const WRITE_SERVER = "paseo-memorise-write";
 const READ_PATH = "/mcp/read";
 const WRITE_PATH = "/mcp/write";
 const MAX_REQUEST_BYTES = 256 * 1024;
@@ -83,7 +81,7 @@ export class MemoryMcp {
 
   private async audit(scope: AgentScope, tool: string, id: string | null, outcome: string): Promise<void> {
     const line = JSON.stringify({ time: new Date().toISOString(), repoKey: scope.repoKey, provider: scope.provider, tool, id, outcome });
-    await appendFile(this.auditPath, `${line}\n`, { mode: 0o600 }).catch((error: unknown) => console.error(`[agent-memory] audit write failed: ${String(error)}`));
+    await appendFile(this.auditPath, `${line}\n`, { mode: 0o600 }).catch((error: unknown) => console.error(`[memorise] audit write failed: ${String(error)}`));
   }
 
   private tool<Args>(scope: AgentScope, name: string, run: (args: Args) => Promise<{ result: string; id: string | null }>) {
@@ -268,7 +266,7 @@ export class MemoryMcp {
   listen(port: number): Promise<Server> {
     const http = createServer((req, res) => {
       void this.handle(req, res).catch((error: unknown) => {
-        console.error(`[agent-memory] MCP request failed: ${String(error)}`);
+        console.error(`[memorise] MCP request failed: ${String(error)}`);
         if (!res.headersSent) res.writeHead(500).end("Internal error");
       });
     });

@@ -54,7 +54,7 @@ export class ProposalStore {
       try {
         proposals.push(proposalSchema.parse(JSON.parse(await readFile(join(dir, name), "utf8"))));
       } catch (error) {
-        console.error(`[agent-memory] skipped unreadable proposal ${join(dir, name)}: ${String(error)}`);
+        console.error(`[memorise] skipped unreadable proposal ${join(dir, name)}: ${String(error)}`);
       }
     }
     return proposals.sort((a, b) => a.created.localeCompare(b.created));
@@ -83,7 +83,7 @@ export class ProposalStore {
           skip.add(hash);
           added.push(proposal);
         } catch (error) {
-          console.error(`[agent-memory] dropped an invalid proposal "${candidate.subject.slice(0, 60)}": ${error instanceof Error ? error.message : String(error)}`);
+          console.error(`[memorise] dropped an invalid proposal "${candidate.subject.slice(0, 60)}": ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       return added;

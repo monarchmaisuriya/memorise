@@ -1,13 +1,13 @@
-Agent memory gives Claude, Codex, and OpenCode agents one shared memory. A fact learned by one agent in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
+Memorise gives Claude, Codex, and OpenCode agents one shared memory. A fact learned by one agent in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
 
 ## How it works
 
-Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/agent-memory/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share.
+Each memory is one short fact in its own Markdown file on the daemon host, under `plugin-data/memorise/` in your Paseo home. Repository memories are grouped by the repository's `origin` remote, so clones and worktrees share them. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias, apart from clones that use the real host. A repository without an origin is grouped by its git folder, which its worktrees share.
 
 When a supported agent is created, the plugin adds two things to it:
 
 - A short list of current memories in its system prompt, at most 150 lines and 8 KB. Memories you pinned come first (up to 20), then memories about files this worktree has changed, then global memories, then the rest of the repository's. The list says the entries are notes to verify, not instructions.
-- Two local MCP tool servers. `paseo-agent-memory` has `memory_search` (full-text search ranked by relevance, optionally limited to memories about given files) and `memory_read`. `paseo-agent-memory-write` has `memory_write`, `memory_update`, and `memory_retire`.
+- Two local MCP tool servers. `paseo-memorise` has `memory_search` (full-text search ranked by relevance, optionally limited to memories about given files) and `memory_read`. `paseo-memorise-write` has `memory_write`, `memory_update`, and `memory_retire`.
 
 A memory about code can cite files by their path from the repository root, or name file globs such as `src/api/**`. The plugin records the commit at the time of citing. When a cited file has changed since then, the list marks that memory "needs check" so the agent verifies it first. Rewording a memory keeps its original citations; citing again records the current commit.
 
@@ -35,13 +35,13 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 - Agents can replace or retire a memory but never delete or pin one. A replaced memory is kept as history, and you can restore a retired one from the Memory panel.
 - Writes that look like they contain a secret (private keys, cloud and GitHub tokens, `password=` assignments, text inside `<private>` tags) are refused with the reason. Each repository allows at most 20 agent writes, replacements, and retirements per hour.
 - Reading memory is approved automatically; saving, changing, or retiring a memory asks you like any other tool, unless the agent runs in a mode that skips approvals (such as bypass or full access). You can turn automatic read approval off.
-- Every tool call is logged to `plugin-data/agent-memory/audit.jsonl` with time, repository, provider, tool, and memory id, but not the memory text. How often each memory was shown, read, and found is counted in `usage.jsonl` (ids only) and shown in the panel.
+- Every tool call is logged to `plugin-data/memorise/audit.jsonl` with time, repository, provider, tool, and memory id, but not the memory text. How often each memory was shown, read, and found is counted in `usage.jsonl` (ids only) and shown in the panel.
 
 ## Using it
 
 - `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>` in the composer saves a memory for the workspace's repository, or for all repositories with `--global`.
-- The Agent memory workspace panel, also in the Command Center, lists memories for the workspace's repository plus global ones, with how often each was used. You can add, edit, pin, retire, restore, and delete them there, and review proposals.
-- Settings > Plugins > Agent memory: memory on or off for new agents, automatic read approval, how many memories go in the prompt, how long an agent-written memory that no agent has found or read stays listed (60 days by default; memories you saved or pinned never expire), the local port of the tool servers (6790 by default), and the capture and tidy options above.
+- The Memorise workspace panel, also in the Command Center, lists memories for the workspace's repository plus global ones, with how often each was used. You can add, edit, pin, retire, restore, and delete them there, and review proposals.
+- Settings > Plugins > Memorise: memory on or off for new agents, automatic read approval, how many memories go in the prompt, how long an agent-written memory that no agent has found or read stays listed (60 days by default; memories you saved or pinned never expire), the local port of the tool servers (6790 by default), and the capture and tidy options above.
 
 ## Limits
 

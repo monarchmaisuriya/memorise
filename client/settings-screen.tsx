@@ -73,7 +73,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
   );
   return (
     <>
-      <SettingsSection title="Agent memory">
+      <SettingsSection title="Memorise">
         <SettingsCard>
           <SettingsSwitch
             label="Give new agents memory"

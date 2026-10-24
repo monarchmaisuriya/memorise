@@ -18,7 +18,7 @@ import {
 import { Capture } from "./capture";
 import { checkCitations } from "./citations";
 import { buildMemorySection, withMemorySection, withoutMemorySection } from "./index-prompt";
-import { LEGACY_SERVER_NAMES, MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
+import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
 import { supportedProvider } from "./providers";
@@ -53,7 +53,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   async function currentSettings(): Promise<MemorySettings> {
     const state = await settings.read();
     if (state.status === "ready") return state.values;
-    console.error(`[agent-memory] settings are invalid (${state.error}); using defaults until they are fixed`);
+    console.error(`[memorise] settings are invalid (${state.error}); using defaults until they are fixed`);
     return memorySettings.schema.parse({});
   }
 
@@ -68,7 +68,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       search = new SearchIndex(root);
     } catch (error) {
       searchProblem = String(error);
-      console.error(`[agent-memory] the search index could not be opened (${searchProblem}); keyword search is off`);
+      console.error(`[memorise] the search index could not be opened (${searchProblem}); keyword search is off`);
     }
     const usage = new UsageLog(root);
     const proposals = new ProposalStore(root);
@@ -79,21 +79,21 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const base = { root, store, tokens, search, usage, proposals, capture, port: mcpPort };
     try {
       const http = await mcp.listen(mcpPort);
-      console.log(`[agent-memory] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
+      console.log(`[memorise] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
       return { ...base, mcpProblem: null, http };
     } catch (error) {
       // Agents keep their stored MCP address, so never silently move to another port.
-      const problem = `the memory tool server could not listen on 127.0.0.1:${mcpPort} (${String(error)}); change the port in Settings > Plugins > Agent memory and reload the plugin`;
-      console.error(`[agent-memory] ${problem}`);
+      const problem = `the memory tool server could not listen on 127.0.0.1:${mcpPort} (${String(error)}); change the port in Settings > Plugins > Memorise and reload the plugin`;
+      console.error(`[memorise] ${problem}`);
       return { ...base, mcpProblem: problem, http: null };
     }
   })();
-  runtime.catch((error: unknown) => console.error(`[agent-memory] failed to start: ${String(error)}`));
+  runtime.catch((error: unknown) => console.error(`[memorise] failed to start: ${String(error)}`));
 
   server.before("agent.create", async ({ request }, { paseo }) => {
     const { config } = request;
     // Always drop what a parent agent passed down: a child may run in another repo.
-    const ownNames = new Set<string>([READ_SERVER, WRITE_SERVER, ...LEGACY_SERVER_NAMES]);
+    const ownNames = new Set<string>([READ_SERVER, WRITE_SERVER]);
     const otherServers = Object.fromEntries(Object.entries(config.mcpServers ?? {}).filter(([name]) => !ownNames.has(name)));
     const stripped = { ...config, systemPrompt: withoutMemorySection(config.systemPrompt), mcpServers: otherServers };
     const provider = supportedProvider(config.provider);
@@ -111,12 +111,12 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       const problems: string[] = mcpProblem ? [mcpProblem] : [];
       const repoKey = await readRepoKey(config.cwd).catch((error: unknown) => {
         problems.push(`repo memory is unavailable for this session (${String(error)})`);
-        console.error(`[agent-memory] repo key for ${config.cwd} failed: ${String(error)}`);
+        console.error(`[memorise] repo key for ${config.cwd} failed: ${String(error)}`);
         return null;
       });
       const changed = repoKey
         ? await workFiles(config.cwd).catch((error: unknown) => {
-            console.error(`[agent-memory] changed files for ${config.cwd} unavailable: ${String(error)}`);
+            console.error(`[memorise] changed files for ${config.cwd} unavailable: ${String(error)}`);
             return [];
           })
         : [];
@@ -125,7 +125,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       if (paths.skipped) problems.push("ranking by changed files was cut short (time budget); some memories about those files may be listed lower");
       const notes = repoKey ? await checkCitations(config.cwd, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
       const section = buildMemorySection({ repoKey, facts: visible, notes, maxLines: values.indexMaxLines, toolsAvailable: mcpProblem === null, problems });
-      await usage.record("shown", section.shownIds).catch((error: unknown) => console.error(`[agent-memory] usage log write failed: ${String(error)}`));
+      await usage.record("shown", section.shownIds).catch((error: unknown) => console.error(`[memorise] usage log write failed: ${String(error)}`));
       const token = tokens.mint({ repoKey, cwd: config.cwd, provider });
       return {
         ...request,
@@ -136,7 +136,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
         },
       };
     } catch (error) {
-      console.error(`[agent-memory] could not prepare memory for a ${provider} agent in ${config.cwd}: ${String(error)}`);
+      console.error(`[memorise] could not prepare memory for a ${provider} agent in ${config.cwd}: ${String(error)}`);
       const section = buildMemorySection({ repoKey: null, facts: [], notes: new Map(), maxLines: 0, toolsAvailable: false, problems: [`memory could not be loaded (${String(error)})`] });
       return { ...request, config: { ...stripped, systemPrompt: withMemorySection(stripped.systemPrompt, section.text) } };
     }
@@ -253,7 +253,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     if (!repoKey) throw new Error("This folder is not in a git repo, so it has no repo memory to tidy.");
     if (capture.isTidying(repoKey)) throw new Error("A tidy of this repo's memory is already running; its proposals will appear here.");
     capture.remember(paseo);
-    void capture.tidyNow(repoKey, directory).catch((error: unknown) => console.error(`[agent-memory] tidy of ${repoKey} failed: ${String(error)}`));
+    void capture.tidyNow(repoKey, directory).catch((error: unknown) => console.error(`[memorise] tidy of ${repoKey} failed: ${String(error)}`));
     return { started: true as const };
   });
 

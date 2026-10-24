@@ -1,10 +1,10 @@
 # memorise
 
-Agent memory for [Paseo](https://paseo.sh): one shared memory for Claude, Codex, and OpenCode agents.
+Memorise for [Paseo](https://paseo.sh): one shared memory for Claude, Codex, and OpenCode agents.
 
 A fact one agent learns in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
 
-The plugin's id in Paseo is `agent-memory`.
+The plugin's id in Paseo is `memorise`.
 
 ## What it does
 
@@ -39,20 +39,20 @@ Check that it is running:
 paseo plugin ls
 ```
 
-The `agent-memory` row should say `running`. Logs are in `paseo plugin logs agent-memory`, or Settings > Plugins > Logs.
+The `memorise` row should say `running`. Logs are in `paseo plugin logs memorise`, or Settings > Plugins > Logs.
 
 Only agents created after the install get memory. Agents already running keep the prompt and tools they started with.
 
 ## Using it
 
 - **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's repository.
-- **Browse and edit:** open the Agent memory workspace panel (also in the Command Center). It lists the repository's memories and the global ones, with how often each was shown, read, and found. You can add, edit, pin, retire, restore, and delete memories there.
+- **Browse and edit:** open the Memorise workspace panel (also in the Command Center). It lists the repository's memories and the global ones, with how often each was shown, read, and found. You can add, edit, pin, retire, restore, and delete memories there.
 - **Review proposals:** the panel's Proposed tab lists what capture and tidy suggested. Edit the text or file paths, then approve or reject.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
 ## Settings
 
-Settings > Plugins > Agent memory.
+Settings > Plugins > Memorise.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
@@ -86,11 +86,11 @@ reads memories: repo + global  -->  ranks them  -->  adds the list to the system
         |
         v
 adds two MCP servers with a token for this agent's repo
-  paseo-agent-memory        memory_search, memory_read
-  paseo-agent-memory-write  memory_write, memory_update, memory_retire
+  paseo-memorise        memory_search, memory_read
+  paseo-memorise-write  memory_write, memory_update, memory_retire
 ```
 
-Everything is stored as files on the daemon host, under `plugin-data/agent-memory/` in your Paseo home (`~/.paseo` by default):
+Everything is stored as files on the daemon host, under `plugin-data/memorise/` in your Paseo home (`~/.paseo` by default):
 
 | Path | What it holds |
 | --- | --- |
@@ -150,7 +150,7 @@ npm run typecheck
 After changing the code, reload the plugin so the daemon picks it up:
 
 ```bash
-paseo plugin reload agent-memory
+paseo plugin reload memorise
 ```
 
 | Folder | Runs in |

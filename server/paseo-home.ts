@@ -11,5 +11,5 @@ export async function resolveMemoryRoot(): Promise<string> {
   if (typeof resolveHome !== "function") throw new Error("@getpaseo/server/daemon-control has no resolvePaseoHome; this Paseo version is not supported");
   const home: unknown = resolveHome();
   if (typeof home !== "string" || home === "") throw new Error("Paseo returned no home directory");
-  return join(home, "plugin-data", "agent-memory");
+  return join(home, "plugin-data", "memorise");
 }

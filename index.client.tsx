@@ -8,10 +8,10 @@ import { PROPOSALS_CARD_KIND, proposalsCardSchema, saveMemoryRpc } from "./share
 
 export default function contribute(client: PluginClientContext) {
   const removers = [
-    client.addWorkspacePanel({ id: "memory", title: "Agent memory", icon: "Brain", context: "workspace", Component: MemoryPanel }),
+    client.addWorkspacePanel({ id: "memory", title: "Memorise", icon: "Brain", context: "workspace", Component: MemoryPanel }),
     client.addCommandCenterItem({
       id: "open-memory",
-      title: "Open agent memory",
+      title: "Open Memorise",
       icon: "Brain",
       keywords: ["memory", "remember", "notes"],
       context: "workspace",
@@ -30,7 +30,7 @@ export default function contribute(client: PluginClientContext) {
         openPanel("memory");
       },
     }),
-    client.addSettingsScreen({ id: "memory", title: "Agent memory", icon: "Brain", Component: MemorySettingsScreen }),
+    client.addSettingsScreen({ id: "memory", title: "Memorise", icon: "Brain", Component: MemorySettingsScreen }),
     client.addTimelineRenderer({
       kind: PROPOSALS_CARD_KIND,
       version: 1,

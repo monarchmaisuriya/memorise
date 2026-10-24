@@ -1,9 +1,9 @@
 import type { FactListItem } from "../shared/memory";
 import { READ_SERVER, WRITE_SERVER } from "./mcp";
 
-const SECTION_START = "<agent-memory>";
-const SECTION_END = "</agent-memory>";
-const SECTION = /\s*<agent-memory>[\s\S]*?<\/agent-memory>/g;
+const SECTION_START = "<memorise>";
+const SECTION_END = "</memorise>";
+const SECTION = /\s*<memorise>[\s\S]*?<\/memorise>/g;
 export const INDEX_MAX_BYTES = 8_192;
 // Pinned facts are listed first but cannot crowd out everything else.
 export const PINNED_MAX_LINES = 20;

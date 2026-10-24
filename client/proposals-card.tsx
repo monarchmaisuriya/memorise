@@ -19,7 +19,7 @@ export function ProposalsCard({ agentId, item, theme, openPanel }: PluginTimelin
         <Text style={{ color: theme.colors.accentForeground, fontSize: 13 }}>Review</Text>
       </Pressable>
       ) : (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in the Agent memory panel of this repo's workspace.</Text>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in the Memorise panel of this repo's workspace.</Text>
       )}
     </View>
   );
