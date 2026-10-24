@@ -187,19 +187,23 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { repoKey, facts };
   });
 
-  server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned }) => {
+  server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned, activation, enabled, until }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     if (scope === "repo" && !repoKey) throw new Error("directory" in where ? "This folder is not in a git repo; save the memory as global instead." : "No repo was chosen; save the memory as global instead.");
     assertNoSecret(subject, body);
-    const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, supersedes: null, source: BY_USER, citations: [] });
+    const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, activation, enabled, until, supersedes: null, source: BY_USER, citations: [] });
     return { fact };
   });
 
-  server.handle(updateMemoryRpc, async ({ where, id, subject, body, type, paths }) => {
+  // A content change is a new version that also carries any control change; controls alone change
+  // in place. Either way it is one write.
+  server.handle(updateMemoryRpc, async ({ where, id, subject, body, type, paths, activation, enabled, until }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     assertNoSecret(subject ?? "", body ?? "");
-    const change = { ...(subject !== undefined && { subject }), ...(body !== undefined && { body }), ...(type !== undefined && { type }), ...(paths !== undefined && { paths }) };
-    return { fact: await store.supersede(id, repoKey, { ...change, source: BY_USER }) };
+    const content = { ...(subject !== undefined && { subject }), ...(body !== undefined && { body }), ...(type !== undefined && { type }), ...(paths !== undefined && { paths }) };
+    const controls = { ...(activation !== undefined && { activation }), ...(enabled !== undefined && { enabled }), ...(until !== undefined && { until }) };
+    if (Object.keys(content).length === 0) return { fact: await store.setControls(id, repoKey, controls) };
+    return { fact: await store.supersede(id, repoKey, { ...content, ...controls, source: BY_USER }) };
   });
 
   server.handle(pinMemoryRpc, async ({ where, id, pinned }) => {
@@ -256,6 +260,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       restore: (id) => store.restore(id, repoKey),
       pin: (id) => store.setPinned(id, repoKey, true),
       unpin: (id) => store.setPinned(id, repoKey, false),
+      enable: (id) => store.setControls(id, repoKey, { enabled: true }),
+      disable: (id) => store.setControls(id, repoKey, { enabled: false }),
       delete: (id) => store.delete(id, repoKey),
     };
     const results: { id: string; ok: boolean; error?: string }[] = [];

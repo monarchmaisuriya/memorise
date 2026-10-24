@@ -8,7 +8,7 @@ import { SearchIndex } from "./search-index";
 import { newFactId } from "./store";
 import { tempDir } from "./test-temp-dir";
 import { UsageLog } from "./usage";
-import { isVisibleToAgents, rankForAgent } from "./visibility";
+import { isVisibleToAgents, listReason, rankForAgent } from "./visibility";
 import { factMatchesFiles, PathMatcher, workFiles } from "./work-files";
 
 function fact(overrides: Partial<FactListItem> = {}): FactListItem {
@@ -23,6 +23,9 @@ function fact(overrides: Partial<FactListItem> = {}): FactListItem {
     status: "active",
     pinned: false,
     paths: [],
+    activation: "listed",
+    enabled: true,
+    until: null,
     supersedes: null,
     created: now,
     modified: now,
@@ -189,5 +192,37 @@ describe("usage log", () => {
     expect(counts.A).toMatchObject({ shown: 10, read: 1, found: 1 });
     expect(counts.B).toMatchObject({ shown: 10, read: 0, found: 1 });
     expect(JSON.parse(await readFile(join(root, "usage-summary.json"), "utf8")).A.shown).toBeGreaterThan(0);
+  });
+});
+
+describe("per-fact controls", () => {
+  const apiChanged = () => new PathMatcher(["src/api/users.ts"], 500);
+  const now = Date.parse("2026-10-24T12:00:00Z");
+
+  it("hides a disabled fact and a fact past its end date, even when pinned or saved by the user", () => {
+    const user = { by: "user" as const, provider: null, branch: null, commit: null };
+    expect(isVisibleToAgents(fact({ enabled: false, source: user }), 60, now)).toBe(false);
+    expect(isVisibleToAgents(fact({ until: "2026-10-23", pinned: true }), 60, now)).toBe(false);
+    expect(isVisibleToAgents(fact({ until: "2026-10-24" }), 60, now)).toBe(true);
+  });
+
+  it("lists facts by activation, and always lists a pinned one", () => {
+    expect(listReason(fact({ activation: "manual" }), apiChanged())).toBeNull();
+    expect(listReason(fact({ activation: "files", paths: ["src/api/**"] }), apiChanged())).toBe("files");
+    expect(listReason(fact({ activation: "files", paths: ["src/web/**"] }), apiChanged())).toBeNull();
+    expect(listReason(fact({ activation: "manual", pinned: true }), apiChanged())).toBe("pinned");
+    expect(listReason(fact({ scope: "global", repoKey: null }), apiChanged())).toBe("global");
+    expect(listReason(fact(), apiChanged())).toBe("repo");
+    const kept = fact({ subject: "kept" });
+    expect(rankForAgent([fact({ activation: "manual" }), kept], apiChanged()).map((item) => item.id)).toEqual([kept.id]);
+  });
+
+  it("lists a title-only fact without its body, and a pinned one in full", () => {
+    const title = fact({ activation: "title", subject: "deploy steps", body: "Run the release script from main." });
+    const pinned = fact({ activation: "title", pinned: true, subject: "lint", body: "Run pnpm lint before pushing." });
+    const { text } = buildMemorySection({ repoKey: "github.com/acme/api", facts: [pinned, title], notes: new Map(), maxLines: 10, toolsAvailable: true, problems: [] });
+    expect(text).toContain("deploy steps (title only; memory_read for details)");
+    expect(text).not.toContain("release script");
+    expect(text).toContain("lint: Run pnpm lint before pushing.");
   });
 });

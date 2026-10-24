@@ -44,7 +44,8 @@ function factLine(fact: FactListItem, note: string | undefined): string {
   const short = body.length > LINE_BODY_CHARS ? `${body.slice(0, LINE_BODY_CHARS - 1)}…` : body;
   const where = `${fact.scope === "global" ? " (global)" : ""}${fact.pinned ? " (pinned)" : ""}`;
   const by = fact.source.by === "user" ? "user" : asLineText(fact.source.provider ?? "agent");
-  return `- [${fact.id}] ${fact.type}${where}: ${asLineText(fact.subject)}: ${short} (${by}, ${fact.created.slice(0, 10)})${note ? ` [needs check: ${asLineText(note)}]` : ""}`;
+  const text = fact.activation === "title" && !fact.pinned ? " (title only; memory_read for details)" : `: ${short}`;
+  return `- [${fact.id}] ${fact.type}${where}: ${asLineText(fact.subject)}${text} (${by}, ${fact.created.slice(0, 10)})${note ? ` [needs check: ${asLineText(note)}]` : ""}`;
 }
 
 // Phrased as notes with provenance, not as commands: they were written by earlier sessions and

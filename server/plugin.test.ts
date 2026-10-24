@@ -229,6 +229,34 @@ describe("memorise server entry", () => {
     expect(pinned.map((item: { id: string }) => item.id).sort()).toEqual([a.id, b.id].sort());
   });
 
+  it("changes controls in place, and a content edit keeps them in the new version", async () => {
+    const fake = start();
+    const repo = { repoKey: "github.com/acme/api" };
+    const { fact } = await fake.call("memory.save", { where: repo, scope: "repo", type: "howto", subject: "deploy", body: "Old steps." });
+    const { fact: off } = await fake.call("memory.update", { where: repo, id: fact.id, enabled: false, activation: "title" });
+    expect(off).toMatchObject({ id: fact.id, enabled: false, activation: "title" });
+    const { fact: next } = await fake.call("memory.update", { where: repo, id: fact.id, body: "New steps.", until: "2027-01-01" });
+    expect(next).toMatchObject({ supersedes: fact.id, body: "New steps.", enabled: false, activation: "title", until: "2027-01-01" });
+  });
+
+  it("keeps disabled and manual memories out of a new agent's index, and bulk-enables them", async () => {
+    const fake = start();
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    const where = { directory: cwd };
+    await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "listed one", body: "Shown." });
+    const { fact: off } = await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "disabled one", body: "Hidden.", enabled: false });
+    const { fact: manual } = await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "manual one", body: "Search only.", activation: "manual" });
+    const listedSubjects = async () => (await fake.create({ provider: "claude", cwd })).config.systemPrompt.split("\n").filter((line: string) => line.startsWith("- ["));
+    const before = (await listedSubjects()).join("\n");
+    expect(before).toContain("listed one");
+    expect(before).not.toContain("disabled one");
+    expect(before).not.toContain("manual one");
+    expect((await fake.call("memory.bulk", { where, ids: [off.id], action: "enable" })).results).toEqual([{ id: off.id, ok: true }]);
+    expect((await listedSubjects()).join("\n")).toContain("disabled one");
+    expect((await fake.call("memory.bulk", { where, ids: [off.id, manual.id], action: "disable" })).results.every((result: { ok: boolean }) => result.ok)).toBe(true);
+    expect((await fake.call("memory.list", { where })).facts.filter((item: { enabled: boolean }) => !item.enabled)).toHaveLength(2);
+  });
+
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
     const fake = start();
     const repo = { repoKey: "github.com/acme/api" };

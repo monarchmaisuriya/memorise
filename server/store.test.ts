@@ -144,6 +144,27 @@ describe("MemoryStore", () => {
     expect(current.map((fact) => fact.id)).toEqual([original.id]);
   });
 
+  it("refuses a files-only fact without paths", async () => {
+    await expect(store.create(repoFact("Only for API files.", { activation: "files" }))).rejects.toThrow(/has no paths/);
+  });
+
+  it("changes controls in place, without a new version", async () => {
+    const fact = await store.create(repoFact("Controls."));
+    expect(fact).toMatchObject({ activation: "listed", enabled: true, until: null });
+    const changed = await store.setControls(fact.id, REPO, { enabled: false, until: "2027-01-01", activation: "title" });
+    expect(changed).toMatchObject({ id: fact.id, enabled: false, until: "2027-01-01", activation: "title" });
+    expect((await store.list(REPO)).map((item) => item.id)).toEqual([fact.id]);
+  });
+
+  it("reads a fact file written before the controls existed with today's behavior", async () => {
+    const fact = await store.create(repoFact("Old file."));
+    const path = join(store.root, "repos", "github.com", "acme", "api", `${fact.id}.md`);
+    const text = await readFile(path, "utf8");
+    await writeFile(path, text.replace(/^activation: .*\n/m, "").replace(/^enabled: .*\n/m, "").replace(/^until: .*\n/m, ""));
+    expect(await readFile(path, "utf8")).not.toMatch(/activation|enabled|until/);
+    expect(await store.get(fact.id, REPO)).toMatchObject({ activation: "listed", enabled: true, until: null });
+  });
+
   it("counts current facts per repo and for global", async () => {
     const replaced = await store.create(repoFact("old"));
     await store.supersede(replaced.id, REPO, { body: "new" });

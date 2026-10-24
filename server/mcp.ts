@@ -177,6 +177,7 @@ export class MemoryMcp {
       { description: "Read one memory in full by its id.", inputSchema: { id: factIdSchema } },
       this.tool(scope, "memory_read", async ({ id }: { id: string }) => {
         const fact = await store.get(id, scope.repoKey);
+        if (!fact.enabled) throw new Error(`Memory ${id} is turned off by the user`);
         if (fact.status === "active" && !fact.superseded) await store.markUsed(id, scope.repoKey);
         await this.options.usage.record("read", [id]);
         return { result: describeFact(fact), id };

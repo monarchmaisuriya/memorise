@@ -186,6 +186,19 @@ describe("memory MCP servers", () => {
     expect((await new UsageLog(store.root).counts())[docker?.id ?? ""]?.found).toBe(1);
   });
 
+  it("hides a disabled memory from search and read, and finds a manual one by search", async () => {
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    const off = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "docker off", body: "Docker note one.", enabled: false, supersedes: null, source, citations: [] });
+    const manual = await store.create({ scope: "repo", repoKey: REPO, type: "gotcha", subject: "docker manual", body: "Docker note two.", activation: "manual", supersedes: null, source, citations: [] });
+    const reader = await connect("read", bearer({ repoKey: REPO, cwd: "/tmp", provider: "claude" }));
+    const found = (await call(reader, "memory_search", { query: "docker" })).text;
+    expect(found).toContain(manual.id);
+    expect(found).not.toContain(off.id);
+    const read = await call(reader, "memory_read", { id: off.id });
+    expect(read.isError).toBe(true);
+    expect(read.text).toMatch(/turned off by the user/);
+  });
+
   it("refuses the GET event stream", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp/read`, { headers: { Authorization: bearer({ repoKey: REPO, cwd: "/tmp", provider: "claude" }), Accept: "text/event-stream" } });
     expect(response.status).toBe(405);

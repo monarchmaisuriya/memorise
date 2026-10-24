@@ -13,7 +13,9 @@ export function newFactId(now = Date.now()): string {
   return time + random;
 }
 
-export type NewFact = Omit<Fact, "id" | "status" | "created" | "modified" | "lastUsed" | "pinned" | "paths"> & Partial<Pick<Fact, "pinned" | "paths">>;
+type Control = "pinned" | "activation" | "enabled" | "until";
+export type Controls = Partial<Pick<Fact, Control>>;
+export type NewFact = Omit<Fact, "id" | "status" | "created" | "modified" | "lastUsed" | "paths" | Control> & Partial<Pick<Fact, "paths" | Control>>;
 
 export class FactNotFoundError extends Error {
   constructor(id: string) {
@@ -89,6 +91,8 @@ export class MemoryStore {
   }
 
   private async save(fact: Fact): Promise<Fact> {
+    // Every write passes here, so a fact can never be left listed for files without any paths.
+    if (fact.activation === "files" && fact.paths.length === 0) throw new Error(`Memory "${fact.subject}" is set to show only for matching files but has no paths; add a path glob or choose another activation`);
     await mkdir(this.dirFor(fact.scope, fact.repoKey), { recursive: true });
     const path = this.pathFor(fact);
     const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
@@ -105,7 +109,7 @@ export class MemoryStore {
   }
 
   // An update is one new file naming the old one, so a crash cannot leave two current versions.
-  supersede(id: string, repoKey: string | null, change: Partial<Pick<Fact, "subject" | "body" | "type" | "citations" | "paths" | "source">>): Promise<Fact> {
+  supersede(id: string, repoKey: string | null, change: Partial<Pick<Fact, "subject" | "body" | "type" | "citations" | "paths" | "source" | Control>>): Promise<Fact> {
     return this.serialize(async () => {
       const old = await this.get(id, repoKey);
       if (old.superseded) throw new Error(`Memory ${id} was already replaced by a newer version; update that one instead`);
@@ -210,12 +214,17 @@ export class MemoryStore {
     return keys;
   }
 
-  // Only the user pins, from the Memory panel; no agent tool reaches this.
-  setPinned(id: string, repoKey: string | null, pinned: boolean): Promise<Fact> {
+  // Controls change the fact in place, without a new version. Only the user sets them, from the
+  // app; no agent tool reaches this.
+  setControls(id: string, repoKey: string | null, controls: Controls): Promise<Fact> {
     return this.serialize(async () => {
       const { superseded: _superseded, ...fact } = await this.get(id, repoKey);
-      return this.save({ ...fact, pinned, modified: new Date().toISOString() });
+      return this.save(factSchema.parse({ ...fact, ...controls, modified: new Date().toISOString() }));
     });
+  }
+
+  setPinned(id: string, repoKey: string | null, pinned: boolean): Promise<Fact> {
+    return this.setControls(id, repoKey, { pinned });
   }
 
   markUsed(id: string, repoKey: string | null): Promise<Fact> {

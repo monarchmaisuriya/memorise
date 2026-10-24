@@ -62,6 +62,16 @@ export const pathGlobSchema = z
 // Who a fact came from. "captured" means proposed from a session transcript and approved by the user.
 export const sourceKindSchema = z.enum(["agent", "user", "captured"]);
 
+// When a fact reaches a new agent's index. listed: ranked as usual. files: only when the worktree
+// changed a file matching its paths. title: the subject only; the agent reads the body with
+// memory_read. manual: never listed; found only by memory_search or memory_read. A pinned fact is
+// always listed in full.
+export const activationSchema = z.enum(["listed", "files", "title", "manual"]);
+export type Activation = z.infer<typeof activationSchema>;
+
+// A date (YYYY-MM-DD, UTC) after which agents no longer see a fact; null means no end date.
+export const untilSchema = z.iso.date().nullable();
+
 export const factSchema = z.object({
   id: factIdSchema,
   scope: scopeSchema,
@@ -74,6 +84,10 @@ export const factSchema = z.object({
   pinned: z.boolean().default(false),
   // Files the fact is about. Facts whose paths match files a worktree changed rank first.
   paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).default([]),
+  // Controls only the user sets, from the app; agent tools never change them.
+  activation: activationSchema.default("listed"),
+  enabled: z.boolean().default(true),
+  until: untilSchema.default(null),
   supersedes: factIdSchema.nullable(),
   created: z.iso.datetime(),
   modified: z.iso.datetime(),
@@ -130,15 +144,31 @@ export const saveMemoryRpc = defineRpc({
     body: bodySchema,
     paths: pathsInput.default([]),
     pinned: z.boolean().default(false),
+    activation: activationSchema.default("listed"),
+    enabled: z.boolean().default(true),
+    until: untilSchema.default(null),
   }),
   output: z.object({ fact: factSchema }),
 });
 
+// Content fields make a new version; controls (activation, enabled, until) change in place.
 export const updateMemoryRpc = defineRpc({
   name: "memory.update",
   input: whereInput
-    .extend({ id: factIdSchema, subject: subjectSchema.optional(), body: bodySchema.optional(), type: memoryTypeSchema.optional(), paths: pathsInput.optional() })
-    .refine((input) => [input.subject, input.body, input.type, input.paths].some((value) => value !== undefined), "Give at least one of subject, body, type, or paths to change"),
+    .extend({
+      id: factIdSchema,
+      subject: subjectSchema.optional(),
+      body: bodySchema.optional(),
+      type: memoryTypeSchema.optional(),
+      paths: pathsInput.optional(),
+      activation: activationSchema.optional(),
+      enabled: z.boolean().optional(),
+      until: untilSchema.optional(),
+    })
+    .refine(
+      (input) => [input.subject, input.body, input.type, input.paths, input.activation, input.enabled, input.until].some((value) => value !== undefined),
+      "Give at least one of subject, body, type, paths, activation, enabled, or until to change",
+    ),
   output: z.object({ fact: factSchema }),
 });
 
@@ -195,7 +225,7 @@ export const moveMemoryRpc = defineRpc({
 });
 
 export const MAX_BULK_IDS = 200;
-export const bulkActionSchema = z.enum(["retire", "restore", "pin", "unpin", "delete"]);
+export const bulkActionSchema = z.enum(["retire", "restore", "pin", "unpin", "enable", "disable", "delete"]);
 export type BulkAction = z.infer<typeof bulkActionSchema>;
 
 export const bulkMemoryRpc = defineRpc({
