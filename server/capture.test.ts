@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
@@ -15,7 +14,7 @@ import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
 import { sliceTranscript } from "./transcript";
 import { UsageLog } from "./usage";
-import { extractJson, isWorkerRequest, runWorker, WORKER_ENV, WORKER_ROLE, workersDir } from "./workers";
+import { extractJson, isWorkerRequest, runWorker, WORKER_ENV, WORKER_ROLE, WORKER_WORKSPACE_TITLE, workersDir } from "./workers";
 
 const REPO = "github.com/acme/api";
 
@@ -42,6 +41,27 @@ function fakePaseo(items: AgentTimelineItem[], reply: string, openFolders: strin
   const running = { now: 0, most: 0 };
   const appended: unknown[] = [];
   const archived: string[] = [];
+  const createAgent = async (options: Record<string, any>) => {
+    created.push(options);
+    return {
+      id: `worker-${created.length}`,
+      workspaceId: `ws-${created.length}`,
+      waitForFinish: async () => {
+        running.now += 1;
+        running.most = Math.max(running.most, running.now);
+        await new Promise((done) => setTimeout(done, workerMs));
+        running.now -= 1;
+        return { status: "idle", final: null, error: null, lastMessage: reply };
+      },
+      archive: async () => {
+        archived.push(`worker-${created.length}`);
+        return {};
+      },
+    };
+  };
+  // Hidden workspaces the plugin made, as Paseo would list them with includeBackground.
+  const hidden: { id: string; projectRootPath: string; workspaceDirectory: string }[] = [];
+  const madeWorkspaces: Array<Record<string, any>> = [];
   const paseo = {
     agents: {
       ref: () => ({
@@ -62,32 +82,27 @@ function fakePaseo(items: AgentTimelineItem[], reply: string, openFolders: strin
           },
         },
       }),
-      create: async (options: Record<string, any>) => {
-        created.push(options);
-        return {
-          id: `worker-${created.length}`,
-          workspaceId: `ws-${created.length}`,
-          waitForFinish: async () => {
-            running.now += 1;
-            running.most = Math.max(running.most, running.now);
-            await new Promise((done) => setTimeout(done, workerMs));
-            running.now -= 1;
-            return { status: "idle", final: null, error: null, lastMessage: reply };
-          },
-          archive: async () => {
-            archived.push(`worker-${created.length}`);
-            return {};
-          },
-        };
-      },
+      create: (options: Record<string, any>) => createAgent(options),
     },
     workspaces: {
-      archive: async (id: string) => archived.push(id),
-      list: async () => ({ entries: openFolders.map((folder) => ({ projectRootPath: folder })), pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+      // Archived workspaces are not listed, as in Paseo.
+      archive: async (id: string) => {
+        archived.push(id);
+        const index = hidden.findIndex((workspace) => workspace.id === id);
+        if (index !== -1) hidden.splice(index, 1);
+      },
+      list: async (options: { includeBackground?: boolean } = {}) => ({ entries: [...openFolders.map((folder) => ({ projectRootPath: folder })), ...(options.includeBackground ? hidden : [])], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+      create: async (options: Record<string, any>) => {
+        madeWorkspaces.push(options);
+        const workspace = { id: `hidden-${madeWorkspaces.length}`, projectRootPath: options.source.path, workspaceDirectory: options.source.path };
+        hidden.push(workspace);
+        return { id: workspace.id };
+      },
+      ref: (id: string) => ({ agents: { create: (options: Record<string, any>) => createAgent({ ...options, cwd: hidden.find((workspace) => workspace.id === id)?.workspaceDirectory, workspaceId: id }) } }),
     },
     providers: { listModels: async (provider: string) => ({ models: [{ provider, id: `${provider}-small` }, { provider, id: `${provider}-default`, isDefault: true }] }) },
   } as unknown as PaseoApi;
-  return { paseo, created, appended, archived, running };
+  return { paseo, created, appended, archived, running, madeWorkspaces, hidden };
 }
 
 describe("capture", () => {
@@ -339,9 +354,13 @@ describe("capture", () => {
 
   it("retries the same turns when the worker could not run, within the daily cap", async () => {
     const broken = fakePaseo(conversation(5), reply);
-    (broken.paseo.agents as { create: unknown }).create = async () => {
-      throw new Error("provider unavailable");
-    };
+    (broken.paseo.workspaces as { ref: unknown }).ref = () => ({
+      agents: {
+        create: async () => {
+          throw new Error("provider unavailable");
+        },
+      },
+    });
     capture.remember(broken.paseo);
     await expect(capture.captureNow(agent)).rejects.toThrow(/provider unavailable/);
     const working = fakePaseo(conversation(5), reply);
@@ -386,11 +405,13 @@ describe("capture", () => {
     const [worker] = fake.created;
     expect(worker.config).toMatchObject({ provider: "codex/codex-default", modeId: "auto", mcpServers: {}, options: { sandbox_mode: "read-only", web_search: "disabled" } });
     expect(worker.env).toEqual({ [WORKER_ENV]: WORKER_ROLE });
-    expect(worker.cwd.startsWith(workersDir(root))).toBe(true);
     expect(worker.prompt).toContain("[removed: AWS access key]");
     expect(worker.prompt).not.toContain("AKIAABCDEFGHIJKLMNOP");
-    expect(existsSync(worker.cwd)).toBe(false);
-    expect(fake.archived).toEqual(["worker-1", "ws-1"]);
+    // In the one hidden workspace on the worker folder; only the worker is archived afterwards.
+    expect(fake.madeWorkspaces).toEqual([{ source: { kind: "directory", path: workersDir(root) }, background: true, title: WORKER_WORKSPACE_TITLE }]);
+    expect(worker).toMatchObject({ cwd: workersDir(root), workspaceId: "hidden-1" });
+    expect(worker).not.toHaveProperty("background");
+    expect(fake.archived).toEqual(["worker-1"]);
     const pending = await proposals.list(REPO);
     expect(pending).toMatchObject([{ kind: "new", subject: "integration tests", paths: ["scripts/**"], source: { from: "capture", agentId: "agent-1", provider: "codex" } }]);
     expect(await store.list(REPO)).toEqual([]);
@@ -423,6 +444,20 @@ describe("capture", () => {
     const folder = await keys.keyOf(plain);
     expect(folder).toMatch(/^folder\//);
     expect((await proposals.list(folder)).map((proposal) => proposal.subject)).toEqual(["integration tests"]);
+  });
+
+  it("reuses the hidden worker workspace for every run, and makes it again only after it was archived", async () => {
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    expect(await capture.captureNow({ ...agent, id: "agent-2" })).toBe(0);
+    expect(fake.created).toHaveLength(2);
+    expect(fake.madeWorkspaces).toHaveLength(1);
+    expect(fake.created.map((worker) => worker.workspaceId)).toEqual(["hidden-1", "hidden-1"]);
+    await fake.paseo.workspaces.archive("hidden-1");
+    expect(await capture.captureNow({ ...agent, id: "agent-3" })).toBe(0);
+    expect(fake.madeWorkspaces).toHaveLength(2);
+    expect(fake.created[2].workspaceId).toBe("hidden-2");
   });
 
   it("skips short sessions, its own workers, and runs over the daily cap", async () => {
@@ -551,7 +586,23 @@ describe("hardening", () => {
           archive: async () => ({}),
         }),
       },
-      workspaces: { archive: async () => undefined },
+      workspaces: {
+        list: async () => ({ entries: [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+        create: async () => ({ id: "hidden-1" }),
+        ref: () => ({
+          agents: {
+            create: async () => ({
+              id: "w1",
+              workspaceId: "hidden-1",
+              waitForFinish: async () => {
+                polls += 1;
+                return { status: "permission", final: null, error: null, lastMessage: null };
+              },
+              archive: async () => ({}),
+            }),
+          },
+        }),
+      },
       providers: { listModels: async () => ({ models: [{ id: "m", isDefault: true }] }) },
     } as unknown as PaseoApi;
     const run = runWorker(paseo, root, { provider: "claude", model: "", title: "t", prompt: "p", outputSchema: {}, timeoutMs: 10 * 60_000 }, () => undefined);
