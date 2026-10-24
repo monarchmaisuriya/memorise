@@ -234,6 +234,23 @@ export const bulkMemoryRpc = defineRpc({
   output: z.object({ results: z.array(z.object({ id: factIdSchema, ok: z.boolean(), error: z.string().optional() })) }),
 });
 
+// The current, active memories of one repo (or global, for a null repo key).
+export const exportMemoryRpc = defineRpc({
+  name: "memory.export",
+  input: whereInput.extend({ format: z.enum(["markdown", "json"]) }),
+  output: z.object({ text: z.string(), count: z.number() }),
+});
+
+// Markdown lines or a JSON export. A dry run reports what would be added and writes nothing.
+export const importMemoryRpc = defineRpc({
+  name: "memory.import",
+  input: whereInput.extend({ scope: scopeSchema, text: z.string().min(1).max(200_000), dryRun: z.boolean() }),
+  output: z.object({
+    added: z.array(z.object({ type: memoryTypeSchema, subject: z.string() })),
+    skipped: z.array(z.object({ line: z.string(), reason: z.string() })),
+  }),
+});
+
 // Per-repo preferences, shared by every worktree of the repo. enabled false: new agents in the repo
 // get no memory and no memory tools. includeGlobal false: the repo's agents see no global memories.
 // capture: "default" follows the host setting; "on" or "off" overrides it for this repo.

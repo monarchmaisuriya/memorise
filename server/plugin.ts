@@ -6,6 +6,8 @@ import {
   getRepoPrefsRpc,
   bulkMemoryRpc,
   deleteMemoryRpc,
+  exportMemoryRpc,
+  importMemoryRpc,
   listMemoriesRpc,
   listProposalsRpc,
   listReposRpc,
@@ -13,6 +15,7 @@ import {
   memoryHistoryRpc,
   memorySettings,
   type MemorySettings,
+  type MemoryType,
   moveMemoryRpc,
   pinMemoryRpc,
   previewMemoryRpc,
@@ -39,6 +42,7 @@ import { RepoPrefs } from "./repo-prefs";
 import { SearchIndex } from "./search-index";
 import { assertNoSecret } from "./secrets";
 import { MemoryStore } from "./store";
+import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
 import { PathMatcher, workFiles } from "./work-files";
@@ -263,6 +267,35 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       .filter(({ fact }) => shown.has(fact.id))
       .map(({ fact, reason }) => ({ id: fact.id, subject: fact.subject, reason, titleOnly: fact.activation === "title" && !fact.pinned }));
     return { repoKey: prepared.repoKey, off: false, text: prepared.section.text, bytes: Buffer.byteLength(prepared.section.text), listed };
+  });
+
+  server.handle(exportMemoryRpc, async ({ where, format }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    const scope = repoKey ? "repo" : "global";
+    const facts = (await store.list(repoKey)).filter((fact) => fact.scope === scope && fact.status === "active" && !fact.superseded).sort((a, b) => a.created.localeCompare(b.created));
+    return { text: formatExport(facts, format, repoKey), count: facts.length };
+  });
+
+  // Imported memories are the user's own. Duplicates of current memories in the target scope, and
+  // repeats within the same import, are skipped and named.
+  server.handle(importMemoryRpc, async ({ where, scope, text, dryRun }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (scope === "repo" && !repoKey) throw new Error("No repo was chosen; import the memories as global instead.");
+    const { entries, skipped } = parseImport(text);
+    const saved = new Set((await store.list(repoKey)).filter((fact) => fact.scope === scope && !fact.superseded).map((fact) => importKey(fact.subject, fact.body)));
+    const seen = new Set<string>();
+    const added: { type: MemoryType; subject: string }[] = [];
+    for (const entry of entries) {
+      const key = importKey(entry.subject, entry.body);
+      if (saved.has(key) || seen.has(key)) {
+        skipped.push({ line: entry.subject, reason: saved.has(key) ? "already saved" : "repeated in this import" });
+        continue;
+      }
+      seen.add(key);
+      added.push({ type: entry.type, subject: entry.subject });
+      if (!dryRun) await store.create({ ...entry, scope, repoKey: scope === "repo" ? repoKey : null, supersedes: null, source: BY_USER, citations: [] });
+    }
+    return { added, skipped };
   });
 
   server.handle(getRepoPrefsRpc, async ({ repoKey }) => ({ prefs: await (await runtime).repoPrefs.get(repoKey) }));

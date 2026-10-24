@@ -294,6 +294,29 @@ describe("memorise server entry", () => {
     expect(apart).not.toContain("global fact");
   });
 
+  it("exports a repo's memories and imports them into another repo once, with a dry run first", async () => {
+    const fake = start();
+    const api = { repoKey: "github.com/acme/api" };
+    const web = { repoKey: "github.com/acme/web" };
+    await fake.call("memory.save", { where: api, scope: "repo", type: "howto", subject: "build", body: "Run make build.", paths: ["Makefile"] });
+    await fake.call("memory.save", { where: api, scope: "repo", type: "gotcha", subject: "docker", body: "Tests need DOCKER_HOST." });
+    await fake.call("memory.save", { where: api, scope: "global", type: "preference", subject: "style", body: "Small commits." });
+    const exported = await fake.call("memory.export", { where: api, format: "json" });
+    expect(exported.count).toBe(2);
+    const dry = await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: true });
+    expect(dry.added.map((entry: { subject: string }) => entry.subject)).toEqual(["build", "docker"]);
+    expect((await fake.call("memory.list", { where: web })).facts.filter((item: { scope: string }) => item.scope === "repo")).toEqual([]);
+    await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: false });
+    const imported = (await fake.call("memory.list", { where: web })).facts.filter((item: { scope: string }) => item.scope === "repo");
+    expect(imported.map((item: { subject: string; paths: string[]; source: { by: string } }) => [item.subject, item.paths, item.source.by]).sort()).toEqual([
+      ["build", ["Makefile"], "user"],
+      ["docker", [], "user"],
+    ]);
+    const again = await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: false });
+    expect(again.added).toEqual([]);
+    expect(again.skipped.map((entry: { reason: string }) => entry.reason)).toEqual(["already saved", "already saved"]);
+  });
+
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
     const fake = start();
     const repo = { repoKey: "github.com/acme/api" };
