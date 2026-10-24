@@ -11,9 +11,9 @@ When a supported agent is created, the plugin adds two things to it:
 
 A memory about code can cite files by their path from the repository root, or name file globs such as `src/api/**`. The plugin records the commit at the time of citing. When a cited file has changed since then, the list marks that memory "needs check" so the agent verifies it first. Rewording a memory keeps its original citations; citing again records the current commit.
 
-## Capture and tidy (optional)
+## Capture, tidy, and project scans (optional)
 
-Capture is off until you turn it on. When it is on and a session has been idle for a while (20 minutes by default), a background agent reads what happened since the last capture and proposes memories. Tidy, run from the Memory panel or weekly, proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. Proposals wait in the Memory panel's Proposed tab; nothing reaches an agent until you approve it, and you can edit the wording first. A finished capture adds a "memories proposed" card to the session's chat; the card is never sent to the model.
+Capture is off until you turn it on. When it is on and a session has been idle for a while (20 minutes by default), a background agent reads what happened since the last capture and proposes memories. Tidy, run from the Memory panel or weekly, proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. A project scan ("Create from project" or "Re-check against project") proposes memories from the repository's README, docs, and build files, or fixes to saved ones those files contradict. Proposals wait in the Proposed tab and in the manager's Proposals view; nothing reaches an agent until you approve it, and you can edit the wording first. A repository can turn on auto-approve, which saves new memories from capture and project scans without review and marks them "auto". A finished capture adds a "memories proposed" card to the session's chat; the card is never sent to the model.
 
 The background agents read text that may contain instructions planted in a session, so their tools are switched off through each provider's own options, they run in an empty folder of their own, and the plugin denies every permission request they make:
 
@@ -26,7 +26,7 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 - By default each session is read by the provider that ran it, so no transcript is sent to another provider. You can choose one provider for all sessions instead.
 - The transcript sent is a summary: your messages, the agent's replies, commands with exit codes, and files touched. Secret-shaped text is replaced before it is sent. Reasoning and tool output are left out.
 - With no model set, the provider's default model is used, which for Claude is its largest model. A model can be set only together with one fixed provider, since a model id belongs to one provider.
-- Capture waits until you have sent at least 3 new messages since the last capture of that session. Capture and tidy together run at most 10 times a day; each run is one model call. A reply that is not valid is not retried for the same turns.
+- Capture waits until you have sent at least 3 new messages since the last capture of that session. Capture, tidy, and project scans together run at most 10 times a day; each run is one model call. A reply that is not valid is not retried for the same turns.
 - Tidy reads only the repository's saved memories, which agents already see in their prompts.
 
 ## What agents can and cannot do
@@ -40,7 +40,7 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 ## Using it
 
 - `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>` in the composer saves a memory for the workspace's repository, or for all repositories with `--global`.
-- The Memorise row in the sidebar opens the manager for global memory and every repository: search, filters, sort, bulk actions, a full editor, version history with revert, per-repository switches, proposals and tidy, import/export (Markdown or JSON), a "Needs attention" view of memories agents cannot see or never use, and the plugin's settings.
+- The Memorise row in the sidebar opens the manager for global memory and every repository: search, filters, sort, bulk actions, a full editor, version history with revert, per-repository switches, proposals across every repository with approve all and reject all, tidy, project scans, auto-approve, import/export (Markdown or JSON), a "Needs attention" view of memories agents cannot see or never use, and the plugin's settings.
 - The Memorise workspace panel lists the workspace's repository memories plus global ones, links to the manager, and shows exactly what a new agent there would get, and why.
 - Each memory has controls only you set: when agents see it (listed, only for matching files, title only, or search only), on or off, and an optional end date.
 - Approve or reject captured memories from the chat card, or edit them in the panel's Proposed tab.

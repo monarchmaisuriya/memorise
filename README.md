@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.3.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.4.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -64,14 +64,15 @@ Only agents created after the install get memory. Agents already running keep th
 ## Using it
 
 - **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's repository.
-- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager. Its left navigation lists global memory and every repository, then **Needs attention** and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
-  - **A scope's memories:** search, plus a **Filters** button (status, type, controls, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, retire, restore, delete). **Repo tools** (or **Import and export** for global) holds the repository's switches and import/export. Each repository also has a **Proposed** tab with its captured memories and tidy.
+- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager. Its left navigation lists global memory and every repository, then **Proposals**, **Needs attention**, and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
+  - **A scope's memories:** search, plus a **Filters** button (status, type, controls, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, retire, restore, delete). **Repo tools** (or **Import and export** for global) holds the repository's switches and import/export. Each repository also has a **Proposed** tab with its proposals, **Create from project**, **Re-check against project**, and tidy.
   - **Each memory:** badges for its type and controls, then Edit, Pin, Turn off, and **More** (retire or restore, make global or move to this repo, history with revert, delete). In the editor, **Options** holds files, when agents see it, on/off, and the end date.
+  - **Proposals:** every repository's waiting proposals in one place, each repository with **Approve all** and **Reject all**, and **Tidy all repos** at the top.
   - **Needs attention:** across global and every repository, the memories agents cannot see (turned off, ended, or hidden after going unused) and those never shown, read, or found 14 days after they were saved.
   - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving the manager.
 - **Work inside a workspace:** the Memorise workspace panel lists the repository's memories and the global ones, with the same card and editor, and "Open in manager".
 - **See what agents get:** the panel's "What agents get" tab shows exactly what a new agent started in that workspace would be given, why each memory is listed (pinned, about files this worktree changed, global, or this repo), and how much of the prompt budget (lines and KB) it uses.
-- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the Proposed tab of the panel or the manager.
+- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the Proposed tab of the panel or the manager. With several waiting, **Approve all** and **Reject all** decide them together.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
 ### Per-memory controls
@@ -93,6 +94,7 @@ In the manager or the panel's "What agents get" tab, shared by every clone and w
 - **Memory on / off:** off gives new agents in this repo no memories and no memory tools.
 - **Includes global memories / Repo memories only:** keeps your global memories out of this repo's agents (list, search, and read).
 - **Capture:** follow the host setting, or turn capture on or off for this repo only.
+- **Auto-approve new memories:** off by default. On, new memories that capture or a project scan propose are saved without waiting for you, marked "auto", and hidden after going unused like an agent's. Rewrites, retirements, and tidy's proposals still wait for you.
 
 ### Import and export
 
@@ -114,9 +116,9 @@ Settings > Plugins > Memorise.
 | Capture model | empty | Only applies when one provider reads every session; empty uses the provider's default model |
 | Capture after the agent is idle for (minutes) | 20 | 5 to 240; a new turn restarts the wait |
 | Capture once you have sent at least this many new messages | 3 | 1 to 50, counted since the last capture of that session |
-| Background runs per day, at most (capture and tidy) | 10 | 1 to 100; each run is one model call |
+| Background runs per day, at most (capture, tidy, and project scans) | 10 | 1 to 100; each run is one model call |
 | What to capture / What never to capture | empty | Optional guidance, up to 2,000 characters each |
-| Provider that tidies / Tidy model | claude / empty | |
+| Provider that tidies / Tidy model | claude / empty | Also used by project scans |
 | Tidy each repo weekly | off | Tidy can also be started from the panel |
 
 With no model set, a provider's default model is used, which for Claude is its largest model. Set a smaller model with a fixed provider to keep capture cheap.
@@ -155,12 +157,13 @@ The Markdown files are the source of truth. Updating a memory writes a new file 
 
 A repository without an origin is grouped by its git folder, which its worktrees share. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias.
 
-## Capture and tidy
+## Capture, tidy, and project scans
 
-Both are off until you turn them on.
+Capture and weekly tidy are off until you turn them on; tidy and project scans can also be started by hand.
 
 - **Capture:** when a session has been idle for a while, a background agent reads a summary of what happened since the last capture and proposes memories. The summary holds your messages, the agent's replies, commands with exit codes, and files touched. Secret-shaped text is replaced before it is sent; reasoning and tool output are left out.
 - **Tidy:** proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. It reads only the repository's saved memories.
+- **Project scan:** **Create from project** proposes memories from the repository's own files; **Re-check against project** also proposes rewriting or retiring saved memories those files contradict. Memorise itself reads a fixed list from the repository root: the README, the contributing guide, up to 8 `docs/*.md`, `package.json` (name, scripts, engines, package manager, workspaces), `Makefile`, `justfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `.tool-versions`, and `.nvmrc`. Each file is cut at 8 KB and all of them at 64 KB (the instruction files and build files first), symlinks, hard links, and binary files are skipped, and secret-shaped text is replaced. `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md` are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of that repository that is open as a Paseo workspace.
 
 The background agents read text that may contain instructions planted in a session, so their tools are switched off and every permission request they make is denied:
 
