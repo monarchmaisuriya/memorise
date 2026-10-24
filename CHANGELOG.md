@@ -4,6 +4,24 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
+### Added
+
+- Settings inside the manager: a Settings item in its navigation shows the same settings as Settings > Plugins > Memorise.
+- Proposals and tidy per repository in the manager (a Proposed tab), not only in a workspace's panel.
+- "Needs attention": memories across global and every repository that agents cannot see (turned off, ended, or hidden after going unused) or have never used 14 days after they were saved.
+- A prompt-budget line in "What agents get": lines and KB used out of the limits.
+
+### Changed
+
+- The manager is decluttered without removing anything: a left navigation; filters behind one Filters button with removable chips for active filters; bulk actions behind Select; repository switches and import/export behind Repo tools; cards with badges, three actions, and More; the editor's files, activation, on/off, and end date behind Options.
+- The proposal and tidy calls take a repository key as well as a workspace folder, like every other memory call.
+
+### Fixed
+
+- Exports list memories saved in the same millisecond in a stable order.
+
 ## [0.2.1] - 2026-10-24
 
 ### Fixed
@@ -46,7 +64,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.3.0
 [0.2.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.1
 [0.2.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.0
 [0.1.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.1.0

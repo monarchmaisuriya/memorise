@@ -283,6 +283,8 @@ export const previewMemoryRpc = defineRpc({
     off: z.boolean(),
     text: z.string(),
     bytes: z.number(),
+    maxLines: z.number(),
+    maxBytes: z.number(),
     listed: z.array(z.object({ id: factIdSchema, subject: z.string(), reason: listReasonSchema, titleOnly: z.boolean() })),
   }),
 });
@@ -312,7 +314,7 @@ export type Proposal = z.infer<typeof proposalSchema>;
 
 export const listProposalsRpc = defineRpc({
   name: "memory.proposals.list",
-  input: directoryInput,
+  input: whereInput,
   output: z.object({
     repoKey: repoKeySchema.nullable(),
     proposals: z.array(proposalSchema.extend({ targetFacts: z.array(z.object({ id: factIdSchema, subject: z.string(), body: z.string() })) })),
@@ -323,13 +325,13 @@ export const listProposalsRpc = defineRpc({
 export const approveProposalRpc = defineRpc({
   name: "memory.proposals.approve",
   // The user may edit the wording before approving.
-  input: directoryInput.extend({ id: factIdSchema, subject: subjectSchema.optional(), body: bodySchema.optional(), paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).optional() }),
+  input: whereInput.extend({ id: factIdSchema, subject: subjectSchema.optional(), body: bodySchema.optional(), paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).optional() }),
   output: z.object({ approved: z.literal(true) }),
 });
 
 export const rejectProposalRpc = defineRpc({
   name: "memory.proposals.reject",
-  input: directoryInput.extend({ id: factIdSchema }),
+  input: whereInput.extend({ id: factIdSchema }),
   output: z.object({ rejected: z.literal(true) }),
 });
 
@@ -339,7 +341,7 @@ export const proposalsCardSchema = z.object({ count: z.number().int().min(1) });
 
 export const tidyMemoryRpc = defineRpc({
   name: "memory.tidy",
-  input: directoryInput,
+  input: whereInput,
   output: z.object({ started: z.literal(true) }),
 });
 

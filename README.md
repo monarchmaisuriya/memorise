@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.2.1
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.3.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -64,10 +64,14 @@ Only agents created after the install get memory. Agents already running keep th
 ## Using it
 
 - **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's repository.
-- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager: global memory and every repository, each with search, filters (status, type, controls), sort, bulk actions (pin, turn on or off, retire, restore, delete), a full editor, version history with revert, and import/export. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
+- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager. Its left navigation lists global memory and every repository, then **Needs attention** and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
+  - **A scope's memories:** search, plus a **Filters** button (status, type, controls, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, retire, restore, delete). **Repo tools** (or **Import and export** for global) holds the repository's switches and import/export. Each repository also has a **Proposed** tab with its captured memories and tidy.
+  - **Each memory:** badges for its type and controls, then Edit, Pin, Turn off, and **More** (retire or restore, make global or move to this repo, history with revert, delete). In the editor, **Options** holds files, when agents see it, on/off, and the end date.
+  - **Needs attention:** across global and every repository, the memories agents cannot see (turned off, ended, or hidden after going unused) and those never shown, read, or found 14 days after they were saved.
+  - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving the manager.
 - **Work inside a workspace:** the Memorise workspace panel lists the repository's memories and the global ones, with the same card and editor, and "Open in manager".
-- **See what agents get:** the panel's "What agents get" tab shows exactly what a new agent started in that workspace would be given, and why each memory is listed (pinned, about files this worktree changed, global, or this repo).
-- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the panel's Proposed tab.
+- **See what agents get:** the panel's "What agents get" tab shows exactly what a new agent started in that workspace would be given, why each memory is listed (pinned, about files this worktree changed, global, or this repo), and how much of the prompt budget (lines and KB) it uses.
+- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the Proposed tab of the panel or the manager.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
 ### Per-memory controls

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import type { z } from "zod";
-import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, tidyMemoryRpc } from "../shared/memory";
+import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, tidyMemoryRpc, type Where } from "../shared/memory";
 import { onMemoryChanged } from "./memory-events";
 import { Button, type Styles } from "./panel-ui";
 
@@ -16,7 +16,7 @@ const KIND_LABEL: Record<ListedProposal["kind"], string> = {
   retire: "Retire",
 };
 
-function ProposalCard({ proposal, directory, styles, onDone }: { proposal: ListedProposal; directory: string; styles: Styles; onDone(): void }) {
+function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedProposal; where: Where; styles: Styles; onDone(): void }) {
   const approve = useRpc(approveProposalRpc);
   const reject = useRpc(rejectProposalRpc);
   const [subject, setSubject] = useState(proposal.subject);
@@ -55,7 +55,7 @@ function ProposalCard({ proposal, directory, styles, onDone }: { proposal: Liste
           onPress={() =>
             action.mutate(() =>
               approve({
-                directory,
+                where,
                 id: proposal.id,
                 ...(editable && subject !== proposal.subject ? { subject } : {}),
                 ...(editable && body !== proposal.body ? { body } : {}),
@@ -64,25 +64,25 @@ function ProposalCard({ proposal, directory, styles, onDone }: { proposal: Liste
             )
           }
         />
-        <Button label="Reject" tone="danger" styles={styles} onPress={() => action.mutate(() => reject({ directory, id: proposal.id }))} />
+        <Button label="Reject" tone="danger" styles={styles} onPress={() => action.mutate(() => reject({ where, id: proposal.id }))} />
       </View>
     </View>
   );
 }
 
 // Proposed changes wait here; nothing reaches an agent until it is approved.
-export function Inbox({ directory, styles, onChanged }: { directory: string; styles: Styles; onChanged(): void }) {
+export function Inbox({ where, styles, onChanged }: { where: Where; styles: Styles; onChanged(): void }) {
   const list = useRpc(listProposalsRpc);
   const tidy = useRpc(tidyMemoryRpc);
   const settings = useSettings(memorySettings);
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["memorise-proposals", directory], queryFn: () => list({ directory }) });
+  const query = useQuery({ queryKey: ["memorise-proposals", where], queryFn: () => list({ where }) });
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ["memorise-proposals", directory] });
+    void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] });
     onChanged();
   };
   useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] })), [queryClient]);
-  const tidyRun = useMutation({ mutationFn: () => tidy({ directory }) });
+  const tidyRun = useMutation({ mutationFn: () => tidy({ where }) });
 
   if (query.isPending) return <Text style={styles.muted}>Loading proposals</Text>;
   if (query.error) return <Text style={styles.danger}>{query.error.message}</Text>;
@@ -92,17 +92,18 @@ export function Inbox({ directory, styles, onChanged }: { directory: string; sty
       <Text style={styles.muted}>
         {captureOn
           ? `Capture is on: finished sessions propose memories here. Runs today: ${query.data.captureRunsToday}.`
-          : "Capture is off. Turn it on in Settings > Plugins > Memorise to have finished sessions propose memories."}
+          : "Capture is off. Turn it on in Settings (in the manager, or Settings > Plugins > Memorise) to have finished sessions propose memories."}
       </Text>
       <View style={styles.row}>
         <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} styles={styles} onPress={() => tidyRun.mutate()} />
         <Button label="Refresh" styles={styles} onPress={refresh} />
       </View>
+      {"repoKey" in where && <Text style={styles.muted}>From the manager, tidy cannot check citations against a checkout; run it from a workspace's panel to include that check.</Text>}
       {tidyRun.isSuccess && <Text style={styles.muted}>Tidy started. Its proposals appear here in a few minutes; press Refresh.</Text>}
       {tidyRun.error && <Text style={styles.danger}>{tidyRun.error.message}</Text>}
       {query.data.proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
       {query.data.proposals.map((proposal) => (
-        <ProposalCard key={proposal.id} proposal={proposal} directory={directory} styles={styles} onDone={refresh} />
+        <ProposalCard key={proposal.id} proposal={proposal} where={where} styles={styles} onDone={refresh} />
       ))}
     </View>
   );

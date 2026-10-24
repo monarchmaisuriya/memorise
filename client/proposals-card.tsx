@@ -19,11 +19,12 @@ function Pending({ agentId, workspaceId, theme, openPanel }: { agentId: string; 
   const approve = useRpc(approveProposalRpc);
   const reject = useRpc(rejectProposalRpc);
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["memorise-proposals", directory], queryFn: () => list({ directory: directory ?? "" }), enabled: directory !== null });
+  const where = { directory: directory ?? "" };
+  const query = useQuery({ queryKey: ["memorise-proposals", where], queryFn: () => list({ where }), enabled: directory !== null });
   const decide = useMutation({
     mutationFn: async ({ id, approved }: { id: string; approved: boolean }) => {
-      if (approved) await approve({ directory: directory ?? "", id });
-      else await reject({ directory: directory ?? "", id });
+      if (approved) await approve({ where, id });
+      else await reject({ where, id });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] });

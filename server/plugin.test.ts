@@ -4,6 +4,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type MemorySettings, memorySettings, updateMemoryRpc } from "../shared/memory";
 import { contributeMemory } from "./plugin";
+import { ProposalStore } from "./proposals";
 import { tempDir } from "./test-temp-dir";
 
 type Handler = (...args: never[]) => unknown;
@@ -265,7 +266,7 @@ describe("memorise server entry", () => {
     const { fact: title } = await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "deploy", body: "Long steps.", activation: "title" });
     const { fact: global } = await fake.call("memory.save", { where, scope: "global", type: "preference", subject: "commits", body: "Small commits." });
     const preview = await fake.call("memory.preview", { directory: cwd });
-    expect(preview).toMatchObject({ repoKey: "github.com/acme/api", off: false });
+    expect(preview).toMatchObject({ repoKey: "github.com/acme/api", off: false, maxLines: 150, maxBytes: 8192 });
     expect(preview.listed).toEqual([
       { id: pinned.id, subject: "lint", reason: "pinned", titleOnly: false },
       { id: global.id, subject: "commits", reason: "global", titleOnly: false },
@@ -304,7 +305,8 @@ describe("memorise server entry", () => {
     const exported = await fake.call("memory.export", { where: api, format: "json" });
     expect(exported.count).toBe(2);
     const dry = await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: true });
-    expect(dry.added.map((entry: { subject: string }) => entry.subject)).toEqual(["build", "docker"]);
+    // Both were saved in the same moment, so the test checks which were added, not their order.
+    expect(dry.added.map((entry: { subject: string }) => entry.subject).sort()).toEqual(["build", "docker"]);
     expect((await fake.call("memory.list", { where: web })).facts.filter((item: { scope: string }) => item.scope === "repo")).toEqual([]);
     await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: false });
     const imported = (await fake.call("memory.list", { where: web })).facts.filter((item: { scope: string }) => item.scope === "repo");
@@ -315,6 +317,22 @@ describe("memorise server entry", () => {
     const again = await fake.call("memory.import", { where: web, scope: "repo", text: exported.text, dryRun: false });
     expect(again.added).toEqual([]);
     expect(again.skipped.map((entry: { reason: string }) => entry.reason)).toEqual(["already saved", "already saved"]);
+  });
+
+  it("lists, approves, and rejects a repo's proposals by repo key, and starts a tidy by repo key", async () => {
+    const fake = start();
+    const repo = { repoKey: "github.com/acme/api" };
+    const source = { from: "capture" as const, agentId: "agent-1", provider: "claude", model: null };
+    const base = { repoKey: "github.com/acme/api", kind: "new" as const, targets: [], type: "howto" as const, paths: [], reason: "", source };
+    await new ProposalStore(root).add([{ ...base, subject: "keep", body: "Keep this." }, { ...base, subject: "drop", body: "Drop this." }], []);
+    const listed = (await fake.call("memory.proposals.list", { where: repo })).proposals;
+    expect(listed.map((proposal: { subject: string }) => proposal.subject).sort()).toEqual(["drop", "keep"]);
+    const id = (subject: string) => listed.find((proposal: { subject: string }) => proposal.subject === subject).id;
+    await fake.call("memory.proposals.approve", { where: repo, id: id("keep") });
+    await fake.call("memory.proposals.reject", { where: repo, id: id("drop") });
+    expect((await fake.call("memory.proposals.list", { where: repo })).proposals).toEqual([]);
+    expect((await fake.call("memory.list", { where: repo })).facts.map((fact: { subject: string }) => fact.subject)).toEqual(["keep"]);
+    expect(await fake.call("memory.tidy", { where: repo })).toEqual({ started: true });
   });
 
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
