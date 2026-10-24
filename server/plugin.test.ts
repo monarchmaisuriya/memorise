@@ -393,10 +393,10 @@ describe("memorise server entry", () => {
     const fake = start({ ...defaults, projectAutoScan: "once" });
     const cwd = tempDir("plugin-plain-");
     await writeFile(join(cwd, "README.md"), "Notes.\n");
+    // The hook returns before the scan finishes, which takes longer than Paseo waits for a hook.
     await fake.workspaceCreated(cwd);
     // The fake Paseo cannot start a worker, so the scan that started fails, and the inbox is told.
-    const { lastRun } = await fake.call("memory.proposals.list", { where: { directory: cwd } });
-    expect(lastRun).toMatchObject({ kind: "scan", state: "failed" });
+    await vi.waitFor(async () => expect((await fake.call("memory.proposals.list", { where: { directory: cwd } })).lastRun).toMatchObject({ kind: "scan", state: "failed" }));
   });
 
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {
@@ -419,8 +419,11 @@ describe("memorise server entry", () => {
     const api = await repoWithOrigin("git@github.com:acme/api.git");
     const web = await repoWithOrigin("git@github.com:acme/web.git");
     const notGit = tempDir("plugin-plain-");
-    // One workspace per page in the fake, so the web workspace is on the third page.
-    fake.workspaces.push({ workspaceDirectory: api, projectRootPath: api }, { projectRootPath: notGit }, { projectRootPath: web });
+    // One workspace per page in the fake, so the web workspace is on the fourth page.
+    // The plugin's own worker folders are never listed as projects.
+    const worker = join(root, "workers", "w1");
+    await mkdir(worker, { recursive: true });
+    fake.workspaces.push({ workspaceDirectory: api, projectRootPath: api }, { projectRootPath: notGit }, { projectRootPath: worker }, { projectRootPath: web });
     const source = { from: "capture" as const, agentId: null, provider: "claude", model: null };
     await new ProposalStore(root).add([{ repoKey: "github.com/acme/docs", kind: "new", targets: [], type: "howto", subject: "docs", body: "Docs build with mkdocs.", paths: [], reason: "", source }], []);
     const { repos } = await fake.call("memory.repos", {});

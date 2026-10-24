@@ -149,7 +149,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
         <SettingsCard>
           <SettingsSelect
             label="Create memories from projects automatically"
-            hint="For every project with an open workspace (git or not), runs Create from project with the tidy provider; weekly also re-checks saved memories against the files. Results wait for review unless the repo has auto-approve on. Each scan is a model call within the daily limit."
+            hint="For every project with an open workspace (git or not), runs Create from project with the tidy provider; weekly also re-checks saved memories against the files. Results wait for review unless the repo has auto-approve on. Each scan is a model call; automatic scans use at most half the daily limit, and skip repos with memory or capture off."
             value={settings.values.projectAutoScan}
             options={PROJECT_AUTO_SCAN_OPTIONS}
             disabled={settings.saving}

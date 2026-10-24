@@ -27,6 +27,8 @@ const TIDY_INTERVAL_MS = 7 * 24 * 60 * MINUTE_MS;
 const PROJECT_SCAN_INTERVAL_MS = 7 * 24 * 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
 const CURSOR_KEEP_MS = 30 * DAY_MS;
+// A project whose first scan failed is tried again after a day, not every hour.
+const PROJECT_SCAN_RETRY_MS = DAY_MS;
 const WORKER_ID_KEEP_MS = 10 * MINUTE_MS;
 
 const stateSchema = z.object({
@@ -36,8 +38,9 @@ const stateSchema = z.object({
   day: z.object({ date: z.string(), runs: z.number() }).default({ date: "", runs: 0 }),
   // When each repo's tidy was last attempted (successful or not), so a failing one is not retried hourly.
   tidiedAt: z.record(z.string(), z.string()).default({}),
-  // When each repo's last project scan started (by hand or automatically), for automatic scans.
-  scannedAt: z.record(z.string(), z.string()).default({}),
+  // Each repo's last project scan (by hand or automatic): when it started, and when one last
+  // finished or failed. Automatic scans decide from it whether a project is due.
+  scans: z.record(z.string(), z.object({ startedAt: z.string(), okAt: z.string().nullable(), failedAt: z.string().nullable() })).default({}),
 });
 type CaptureState = z.infer<typeof stateSchema>;
 
@@ -68,6 +71,8 @@ export class Capture {
   private projectScanTimer: ReturnType<typeof setInterval> | null = null;
   // Automatic project scans run one after another, whichever trigger started them.
   private autoScans: Promise<unknown> = Promise.resolve();
+  // The last automatic scan problem logged per repo, so an hourly sweep does not repeat it.
+  private readonly autoScanProblems = new Map<string, string>();
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: CaptureDeps) {
@@ -84,8 +89,11 @@ export class Capture {
     this.paseo = paseo;
     if (this.swept) return;
     this.swept = true;
-    void this.sweepProjects().catch((error: unknown) => console.error(`[memorise] automatic project scans failed: ${error instanceof Error ? error.message : String(error)}`));
-    void this.sweepLeftoverWorkers(paseo).catch((error: unknown) => console.error(`[memorise] could not remove leftover workers: ${String(error)}`));
+    // Leftover workers go first: removing them must not remove a worker a scan just started.
+    void this.sweepLeftoverWorkers(paseo)
+      .catch((error: unknown) => console.error(`[memorise] could not remove leftover workers: ${String(error)}`))
+      .then(() => this.sweepProjects())
+      .catch((error: unknown) => console.error(`[memorise] automatic project scans failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   private async sweepLeftoverWorkers(paseo: PaseoApi): Promise<void> {
@@ -251,6 +259,7 @@ export class Capture {
   // once (no Paseo, no files, the daily limit) throw here; `done` settles when the worker finishes.
   async startScan(repoKey: string, cwd: string, mode: ScanMode): Promise<{ done: Promise<{ pending: number; autoSaved: number }> }> {
     if (this.scanning.has(repoKey)) throw new Error("A project scan of this repo is already running");
+    if (isWorkerCwd(this.deps.root, cwd)) throw new Error("The plugin's own worker folders are never scanned");
     this.scanning.add(repoKey);
     try {
       const paseo = this.paseo;
@@ -259,10 +268,25 @@ export class Capture {
       const files = await readProjectFiles(cwd);
       if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
       await this.requireRun(`project scan of ${repoKey}`, values.captureMaxPerDay);
+      const startedAt = new Date().toISOString();
       await this.serializeState((state) => {
-        state.scannedAt[repoKey] = new Date().toISOString();
+        state.scans[repoKey] = { startedAt, okAt: state.scans[repoKey]?.okAt ?? null, failedAt: null };
       });
-      const run = this.track(repoKey, "scan", this.runScan(paseo, repoKey, mode, files, values), ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`);
+      const finish = (outcome: "okAt" | "failedAt") =>
+        this.serializeState((state) => {
+          const entry = state.scans[repoKey];
+          if (entry?.startedAt === startedAt) entry[outcome] = new Date().toISOString();
+        });
+      const run = this.track(repoKey, "scan", this.runScan(paseo, repoKey, mode, files, values), ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`).then(
+        async (result) => {
+          await finish("okAt");
+          return result;
+        },
+        async (error: unknown) => {
+          await finish("failedAt");
+          throw error;
+        },
+      );
       return { done: run.finally(() => this.scanning.delete(repoKey)) };
     } catch (error) {
       this.scanning.delete(repoKey);
@@ -470,36 +494,51 @@ export class Capture {
     }, 60 * MINUTE_MS);
   }
 
-  // With projectAutoScan on, a project gets "Create from project" once, and with "weekly" a re-check
-  // ("refresh") a week after its last scan. A scan counts once it has started, so one that cannot
-  // start (no files, the daily limit) is tried again later. Returns whether a scan ran.
+  // With projectAutoScan on, a project gets "Create from project" until one succeeds (a failed one is
+  // tried again a day later), and with "weekly" a re-check ("refresh") a week after its last scan.
+  // Skipped: worker folders, projects with memory or capture off here, and days when automatic scans
+  // have used half the daily limit, which keeps the rest for capture and for you. A scan that cannot
+  // start (no files, the daily limit) is tried at the next sweep. Problems are logged once per repo
+  // until they change; this never rejects. Returns whether a scan ran and finished.
   scanIfDue(repoKey: string, folder: string): Promise<boolean> {
     const next = this.autoScans.then(async () => {
       const values = await this.deps.settings();
-      if (values.projectAutoScan === "off" || this.scanning.has(repoKey)) return false;
-      if (!(await this.deps.repoPrefs.get(repoKey)).enabled) return false;
-      const last = (await this.readState()).scannedAt[repoKey];
-      if (last && (values.projectAutoScan === "once" || Date.now() - Date.parse(last) < PROJECT_SCAN_INTERVAL_MS)) return false;
-      const { done } = await this.startScan(repoKey, folder, last ? "refresh" : "create");
-      await done;
-      return true;
+      if (values.projectAutoScan === "off" || this.scanning.has(repoKey) || isWorkerCwd(this.deps.root, folder)) return false;
+      const prefs = await this.deps.repoPrefs.get(repoKey);
+      if (!prefs.enabled || prefs.capture === "off") return false;
+      if ((await this.runsToday()) >= Math.max(1, Math.floor(values.captureMaxPerDay / 2))) return false;
+      const last = (await this.readState()).scans[repoKey];
+      const now = Date.now();
+      const due = !last
+        ? true
+        : !last.okAt
+          ? now - Date.parse(last.failedAt ?? last.startedAt) >= PROJECT_SCAN_RETRY_MS
+          : values.projectAutoScan === "weekly" && now - Date.parse(last.startedAt) >= PROJECT_SCAN_INTERVAL_MS;
+      if (!due) return false;
+      try {
+        const { done } = await this.startScan(repoKey, folder, last?.okAt ? "refresh" : "create");
+        await done;
+        this.autoScanProblems.delete(repoKey);
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (this.autoScanProblems.get(repoKey) !== message) console.error(`[memorise] automatic project scan of ${repoKey}: ${message}`);
+        this.autoScanProblems.set(repoKey, message);
+        return false;
+      }
     });
-    this.autoScans = next.catch(() => undefined);
+    this.autoScans = next;
     return next;
   }
 
-  // Scans every project with an open workspace that is due, one at a time. A project that fails is
-  // logged and the rest still run. Returns the repo keys scanned.
+  // Scans every project with an open workspace that is due, one at a time. Returns the repo keys
+  // scanned.
   async sweepProjects(): Promise<string[]> {
     const paseo = this.paseo;
     if (!paseo || (await this.deps.settings()).projectAutoScan === "off") return [];
     const scanned: string[] = [];
-    for (const [repoKey, folder] of await openRepoCheckouts(paseo)) {
-      const ran = await this.scanIfDue(repoKey, folder).catch((error: unknown) => {
-        console.error(`[memorise] automatic project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`);
-        return false;
-      });
-      if (ran) scanned.push(repoKey);
+    for (const [repoKey, folder] of await openRepoCheckouts(paseo, this.deps.root)) {
+      if (await this.scanIfDue(repoKey, folder)) scanned.push(repoKey);
     }
     return scanned;
   }

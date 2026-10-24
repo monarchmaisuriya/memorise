@@ -110,7 +110,7 @@ export class MemoryMcp {
 
   private requireRepo(scope: AgentScope): string {
     if (scope.repoKey) return scope.repoKey;
-    throw new Error("This agent's folder is not in a git repo, so it has no repo memory. Only the user can save global memories, with /remember --global.");
+    throw new Error("This agent has no project memory (its folder could not be read when it started). Only the user can save global memories, with /remember --global.");
   }
 
   private takeWriteSlot(repoKey: string): void {

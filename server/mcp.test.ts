@@ -106,7 +106,7 @@ describe("memory MCP servers", () => {
     const repoWriter = await connect("write", bearer({ repoKey: REPO, cwd: "/tmp", provider: "claude" }));
     expect((await call(repoWriter, "memory_update", { id: global.id, fact: "Commit freely." })).text).toMatch(/global; only the user/);
     const noRepoWriter = await connect("write", bearer({ repoKey: null, cwd: "/tmp", provider: "claude" }));
-    expect((await call(noRepoWriter, "memory_write", { type: "howto", subject: "x", fact: "y" })).text).toMatch(/not in a git repo/);
+    expect((await call(noRepoWriter, "memory_write", { type: "howto", subject: "x", fact: "y" })).text).toMatch(/no project memory/);
   });
 
   it("refuses secret-shaped text and writes nothing", async () => {

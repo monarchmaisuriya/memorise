@@ -16,10 +16,13 @@ function splitRemote(url: string): { host: string; path: string } | null {
   return hostname === "" ? null : { host: hostname, path: pathname };
 }
 
+// Keys under these hosts are made by this plugin, so a remote can never claim one.
+const RESERVED_HOSTS = new Set(["folder", "local"]);
+
 // Clones and worktrees of one repository share the key, whatever folder they live in.
 export function repoKeyFromRemote(remoteUrl: string): string | null {
   const remote = splitRemote(remoteUrl.trim());
-  if (!remote) return null;
+  if (!remote || RESERVED_HOSTS.has(remote.host.toLowerCase())) return null;
   const segments = remote.path
     .toLowerCase()
     .replace(/\.git\/?$/, "")
@@ -41,11 +44,22 @@ const FOLDER_NAME_MAX = 40;
 // name so the manager can show which folder it is. Moving the folder gives it a new key.
 export function folderKey(realPath: string): string {
   const name = basename(realPath).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "").slice(0, FOLDER_NAME_MAX);
-  return `${FOLDER_PREFIX}${name || "root"}-${createHash("sha256").update(realPath).digest("hex").slice(0, 12)}`;
+  return `${FOLDER_PREFIX}${name || (realPath === "/" ? "root" : "folder")}-${createHash("sha256").update(realPath).digest("hex").slice(0, 12)}`;
 }
 
 function isOutsideRepo(error: unknown): boolean {
   return error instanceof GitError && error.stderr.includes("not a git repository");
+}
+
+// The folder a key names: the repo's top level, or the folder itself when it is not in git. Any other
+// git failure is thrown, so a scan never reads a subfolder under the repo's key.
+export async function projectRoot(cwd: string): Promise<string> {
+  try {
+    return await realpath(await git(cwd, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS));
+  } catch (error) {
+    if (isOutsideRepo(error)) return realpath(cwd);
+    throw error;
+  }
 }
 
 // The key of the repo `cwd` is in, or of the folder itself when it is not in git.

@@ -206,12 +206,16 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     await paseo.agents.ref(agent.id).respondToPermission({ requestId: request.id, response: { behavior: "allow" } });
   });
 
-  // A new workspace's project is scanned when automatic project scans are on and it is due.
+  // A new workspace's project is queued for a scan when automatic project scans are on and it is due.
+  // The hook returns at once: a scan takes longer than Paseo waits for a hook. Workspaces of the
+  // plugin's own workers are never scanned.
   server.on("workspace.created", async ({ workspace }, { paseo }) => {
     const { capture } = await runtime;
     capture.remember(paseo);
-    const repoKey = await readRepoKey(workspace.cwd);
-    await capture.scanIfDue(repoKey, workspace.cwd).catch((error: unknown) => console.error(`[memorise] automatic project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
+    if (capture.isWorker("", workspace.cwd)) return;
+    void readRepoKey(workspace.cwd)
+      .then((repoKey) => capture.scanIfDue(repoKey, workspace.cwd))
+      .catch((error: unknown) => console.error(`[memorise] automatic project scan of ${workspace.cwd}: ${error instanceof Error ? error.message : String(error)}`));
   });
 
   server.on("agent.turn_started", async ({ agent }) => {
@@ -322,8 +326,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // Every repo the manager can work on: those with memories (with counts), those with an open Paseo
   // workspace, and those with proposals waiting. Global comes first, then repos by key.
   server.handle(listReposRpc, async (_input, { paseo }) => {
-    const { store, proposals } = await runtime;
-    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo), proposals.summary()]);
+    const { store, proposals, root } = await runtime;
+    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo, root), proposals.summary()]);
     const known = new Set(withMemories.map((repo) => repo.repoKey));
     const others = [...new Set([...open.keys(), ...waiting.map((repo) => repo.repoKey)])].filter((repoKey) => !known.has(repoKey));
     const repos = [...withMemories, ...others.map((repoKey) => ({ repoKey, active: 0, retired: 0, lastModified: null }))];
@@ -414,7 +418,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       return { repoKey: await readRepoKey(where.directory), folder: where.directory };
     }
     if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
-    const folder = (await openRepoCheckouts(paseo)).get(where.repoKey);
+    const folder = (await openRepoCheckouts(paseo, (await runtime).root)).get(where.repoKey);
     if (folder) return { repoKey: where.repoKey, folder };
     throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
   }

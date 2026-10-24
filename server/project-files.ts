@@ -1,6 +1,6 @@
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { git } from "./git";
+import { projectRoot } from "./repo-key";
 import { redactSecrets } from "./secrets";
 
 export const MAX_FILE_BYTES = 8 * 1024;
@@ -21,12 +21,6 @@ export interface ProjectFile {
 const PACKAGE_FIELDS = ["name", "scripts", "engines", "packageManager", "workspaces"] as const;
 const MANIFESTS = ["package.json", "Makefile", "justfile", "pyproject.toml", "Cargo.toml", "go.mod", ".tool-versions", ".nvmrc"];
 const INSTRUCTIONS = ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"];
-
-// The repo's top level, or the folder itself when it is not in git: the same folder its key names.
-async function projectRoot(cwd: string): Promise<string> {
-  const top = await git(cwd, ["rev-parse", "--show-toplevel"], 2_000).catch(() => "");
-  return realpath(top || cwd);
-}
 
 // Only regular files with one link whose real path stays inside the repo: a symlink, a hard link, or
 // a file reached through a symlinked folder is never read. Only the start of a file is read, and a
