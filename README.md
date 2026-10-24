@@ -10,7 +10,7 @@ The plugin's id in Paseo is `memorise`.
 
 ## What it does
 
-- **Remembers per repository.** Memories are grouped by the repository's `origin` remote, so clones and worktrees of the same repo share them.
+- **Remembers per repository.** Memories are grouped by the repository's `origin` remote, so clones and worktrees of the same repo share them. A folder outside git is a project of its own, with the same features.
 - **Remembers for you.** Global memories (your preferences, conventions) reach agents in every repository. Only you can write them.
 - **Shows agents what matters first.** Each new agent gets a short list in its system prompt: pinned memories, then memories about files this worktree has changed, then global ones, then the rest of the repository's.
 - **Gives agents tools.** `memory_search`, `memory_read`, `memory_write`, `memory_update`, and `memory_retire`, over two local MCP servers.
@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.4.1
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.5.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -120,6 +120,7 @@ Settings > Plugins > Memorise.
 | What to capture / What never to capture | empty | Optional guidance, up to 2,000 characters each |
 | Provider that tidies / Tidy model | claude / empty | Also used by project scans |
 | Tidy each repo weekly | off | Tidy can also be started from the panel |
+| Create memories from projects automatically | off | Once per project, or once then a weekly re-check; see below |
 
 With no model set, a provider's default model is used, which for Claude is its largest model. Set a smaller model with a fixed provider to keep capture cheap.
 
@@ -130,6 +131,7 @@ agent created in a workspace
         |
         v
 plugin finds the repo key from the origin remote   e.g. github.com/acme/api
+  (a folder outside git: from its path)            e.g. folder/notes-3f9a1c2b7d4e
         |
         v
 reads memories: repo + global  -->  ranks them  -->  adds the list to the system prompt
@@ -157,13 +159,16 @@ The Markdown files are the source of truth. Updating a memory writes a new file 
 
 A repository without an origin is grouped by its git folder, which its worktrees share. A clone whose origin uses an SSH host alias (such as `work-github:owner/repo`) is grouped under that alias.
 
+A folder outside git is grouped by its own path, under a key such as `folder/notes-3f9a1c2b7d4e` that carries its name. It has everything a repository has (memories, agent tools, the manager and panel, capture, tidy, project scans, auto-approve, switches, import and export), except what needs git history: ranking by files the checkout changed, and citations pinned to a commit. Moving or renaming the folder gives it a new key; export and import carry its memories over.
+
 ## Capture, tidy, and project scans
 
 Capture and weekly tidy are off until you turn them on; tidy and project scans can also be started by hand.
 
 - **Capture:** when a session has been idle for a while, a background agent reads a summary of what happened since the last capture and proposes memories. The summary holds your messages, the agent's replies, commands with exit codes, and files touched. Secret-shaped text is replaced before it is sent; reasoning and tool output are left out.
 - **Tidy:** proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. It reads only the repository's saved memories.
-- **Project scan:** **Create from project** proposes memories from the repository's own files; **Re-check against project** also proposes rewriting or retiring saved memories those files contradict. Memorise itself reads a fixed list from the repository root: the README, the contributing guide, up to 8 `docs/*.md`, `package.json` (name, scripts, engines, package manager, workspaces), `Makefile`, `justfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `.tool-versions`, and `.nvmrc`. Each file is cut at 8 KB and all of them at 64 KB (the instruction files and build files first), symlinks, hard links, and binary files are skipped, and secret-shaped text is replaced. `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md` are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of that repository that is open as a Paseo workspace.
+- **Project scan:** **Create from project** proposes memories from the repository's own files; **Re-check against project** also proposes rewriting or retiring saved memories those files contradict. Memorise itself reads a fixed list from the repository root: the README, the contributing guide, up to 8 `docs/*.md`, `package.json` (name, scripts, engines, package manager, workspaces), `Makefile`, `justfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `.tool-versions`, and `.nvmrc`. Each file is cut at 8 KB and all of them at 64 KB (the instruction files and build files first), symlinks, hard links, and binary files are skipped, and secret-shaped text is replaced. `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md` are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of that repository that is open as a Paseo workspace. In a folder outside git, the scan reads the folder itself.
+- **Automatic project scans:** with "Create memories from projects automatically" set to **Once per project**, every project with an open Paseo workspace (git or not) gets one Create from project scan; **Once, then re-check weekly** also re-checks it a week after its last scan. Scans start when a workspace is created, when the plugin starts, and hourly, one at a time. Automatic scans stop for the day once background runs reach half the daily limit, which leaves the rest for capture and for scans you start. A first scan that fails is tried again a day later. A scan you started by hand counts; a project with memory off, or with capture turned off for it, is skipped; the plugin's own worker folders are never scanned. The results are proposals, saved straight away only where the project has auto-approve on.
 
 The background agents read text that may contain instructions planted in a session, so their tools are switched off and every permission request they make is denied:
 
