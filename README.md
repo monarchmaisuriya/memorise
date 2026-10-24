@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.1
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.2
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -67,7 +67,7 @@ Only agents created after the install get memory. Agents already running keep th
 - **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager. Its left navigation lists global memory and every repository that has memories, an open Paseo workspace, or proposals waiting, then **Proposals**, **Needs attention**, and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
   - **A scope's memories:** search, plus a **Filters** button (status, type, controls, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, retire, restore, delete). **Repo tools** (or **Import and export** for global) holds the repository's switches and import/export. Each repository also has a **Proposed** tab with its proposals, **Create from project**, **Re-check against project**, and tidy.
   - **Each memory:** badges for its type and controls, then Edit, Pin, Turn off, and **More** (retire or restore, make global or move to this repo, history with revert, delete). In the editor, **Options** holds files, when agents see it, on/off, and the end date.
-  - **Proposals:** every repository's waiting proposals in one place, each repository with **Approve all** and **Reject all**, and **Tidy all repos** (those with at least 2 memories) at the top.
+  - **Proposals:** every repository's waiting proposals in one place, one collapsible card per repository (with **Approve all** and **Reject all** inside), **Expand all** / **Collapse all**, and **Tidy all repos** (those with at least 2 memories) at the top.
   - **Needs attention:** across global and every repository, the memories agents cannot see (turned off, ended, or hidden after going unused) and those never shown, read, or found 14 days after they were saved.
   - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving the manager.
 - **Work inside a workspace:** the Memorise workspace panel lists the repository's memories and the global ones, with the same card and editor, and "Open in manager".
