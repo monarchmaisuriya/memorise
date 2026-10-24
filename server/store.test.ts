@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { factIdSchema } from "../shared/memory";
@@ -100,5 +100,82 @@ describe("MemoryStore", () => {
 
   it("rejects a repo key that could escape the store", async () => {
     await expect(store.create(repoFact("Escape.", { repoKey: "github.com/../../etc" }))).rejects.toThrow();
+  });
+
+  it("returns a fact's whole version chain, newest first, from any version's id", async () => {
+    const v1 = await store.create(repoFact("v1"));
+    const v2 = await store.supersede(v1.id, REPO, { body: "v2" });
+    const v3 = await store.supersede(v2.id, REPO, { body: "v3", type: "decision" });
+    expect((await store.history(v1.id, REPO)).map((fact) => fact.body)).toEqual(["v3", "v2", "v1"]);
+    expect((await store.history(v3.id, REPO))[0]).toMatchObject({ id: v3.id, type: "decision" });
+  });
+
+  it("reverts by writing a new version with an older version's content, overwriting nothing", async () => {
+    const v1 = await store.create(repoFact("original", { subject: "first subject" }));
+    const v2 = await store.supersede(v1.id, REPO, { subject: "second subject", body: "changed" });
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    const v3 = await store.revert(v2.id, v1.id, REPO, source);
+    expect(v3).toMatchObject({ subject: "first subject", body: "original", supersedes: v2.id, source });
+    expect((await store.history(v3.id, REPO)).map((fact) => fact.id)).toEqual([v3.id, v2.id, v1.id]);
+    await expect(store.revert(v2.id, v1.id, REPO, source)).rejects.toThrow(/already replaced/);
+  });
+
+  it("moves a repo fact to global as a new fact, retiring the original and dropping its citations", async () => {
+    const original = await store.create(repoFact("Prefer pnpm.", { paths: ["package.json"] }));
+    const moved = await store.move(original.id, REPO, "global");
+    expect(moved).toMatchObject({ scope: "global", repoKey: null, body: "Prefer pnpm.", paths: ["package.json"], citations: [], supersedes: null });
+    expect((await store.get(original.id, REPO)).status).toBe("retired");
+    expect((await store.list("github.com/acme/web")).map((fact) => fact.id)).toEqual([moved.id]);
+    await expect(store.move(moved.id, REPO, "global")).rejects.toThrow(/already global/);
+    await expect(store.move(moved.id, null, "repo")).rejects.toThrow(/Choose a repo/);
+  });
+
+  it("leaves only the original when retiring it fails during a move", async () => {
+    const original = await store.create(repoFact("Stays put."));
+    const repoDir = join(store.root, "repos", "github.com", "acme", "api");
+    await mkdir(join(store.root, "global"), { recursive: true });
+    await chmod(repoDir, 0o500);
+    try {
+      await expect(store.move(original.id, REPO, "global")).rejects.toThrow();
+    } finally {
+      await chmod(repoDir, 0o700);
+    }
+    const current = (await store.list(REPO)).filter((fact) => fact.status === "active" && !fact.superseded);
+    expect(current.map((fact) => fact.id)).toEqual([original.id]);
+  });
+
+  it("refuses a files-only fact without paths", async () => {
+    await expect(store.create(repoFact("Only for API files.", { activation: "files" }))).rejects.toThrow(/has no paths/);
+  });
+
+  it("changes controls in place, without a new version", async () => {
+    const fact = await store.create(repoFact("Controls."));
+    expect(fact).toMatchObject({ activation: "listed", enabled: true, until: null });
+    const changed = await store.setControls(fact.id, REPO, { enabled: false, until: "2027-01-01", activation: "title" });
+    expect(changed).toMatchObject({ id: fact.id, enabled: false, until: "2027-01-01", activation: "title" });
+    expect((await store.list(REPO)).map((item) => item.id)).toEqual([fact.id]);
+  });
+
+  it("reads a fact file written before the controls existed with today's behavior", async () => {
+    const fact = await store.create(repoFact("Old file."));
+    const path = join(store.root, "repos", "github.com", "acme", "api", `${fact.id}.md`);
+    const text = await readFile(path, "utf8");
+    await writeFile(path, text.replace(/^activation: .*\n/m, "").replace(/^enabled: .*\n/m, "").replace(/^until: .*\n/m, ""));
+    expect(await readFile(path, "utf8")).not.toMatch(/activation|enabled|until/);
+    expect(await store.get(fact.id, REPO)).toMatchObject({ activation: "listed", enabled: true, until: null });
+  });
+
+  it("counts current facts per repo and for global", async () => {
+    const replaced = await store.create(repoFact("old"));
+    await store.supersede(replaced.id, REPO, { body: "new" });
+    const retired = await store.create(repoFact("gone"));
+    await store.retire(retired.id, REPO);
+    await store.create(repoFact("Global one.", { scope: "global", repoKey: null }));
+    const summaries = await store.summaries();
+    expect(summaries.map(({ repoKey, active, retired: count }) => ({ repoKey, active, retired: count }))).toEqual([
+      { repoKey: null, active: 1, retired: 0 },
+      { repoKey: REPO, active: 1, retired: 1 },
+    ]);
+    expect(summaries[1].lastModified).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 });

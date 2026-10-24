@@ -4,6 +4,25 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-24
+
+### Added
+
+- A Memorise row in the sidebar header opens a manager for global memory and every repository, without opening a workspace: search, filters (status, type, controls), sort, bulk actions, a full editor, version history with revert, and moving a memory between a repository and global. Command Center items open it for the current repository or globally.
+- Per-memory controls, set only by you: when agents see it (listed, only for matching files, title only, search only), on or off, and an optional end date.
+- Per-repository switches: memory off for new agents, keep global memories out, and a capture override.
+- "What agents get" in the panel: exactly what a new agent in that workspace would be given, and why each memory is listed.
+- Approve and reject captured memories from the chat card.
+- Import and export: Markdown lines for reading, JSON that keeps paths and controls, and `[date] - text` lines from assistant memory exports, with a check before anything is written.
+
+### Changed
+
+- The editor sets the subject, type, paths, and pin directly; the subject is no longer cut from the first line.
+
+### Notes
+
+- Do not downgrade to 0.1.0 without exporting first: 0.1.0 drops the new per-memory controls when it rewrites a memory.
+
 ## [0.1.0] - 2026-10-24
 
 First release.
@@ -19,5 +38,6 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.2.0
 [0.1.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.1.0

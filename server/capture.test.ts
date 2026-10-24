@@ -9,6 +9,7 @@ import { Capture } from "./capture";
 import { buildCapturePrompt, parseCandidates, parseTidyActions } from "./extractor";
 import type { AgentTimelineItem, PaseoApi } from "./paseo-types";
 import { ProposalStore, proposalHash } from "./proposals";
+import { RepoPrefs } from "./repo-prefs";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
 import { sliceTranscript } from "./transcript";
@@ -83,6 +84,7 @@ describe("capture", () => {
   let proposals: ProposalStore;
   let values: MemorySettings;
   let capture: Capture;
+  let repoPrefs: RepoPrefs;
   let cwd: string;
   let agent: PluginHookAgent;
 
@@ -91,7 +93,8 @@ describe("capture", () => {
     store = new MemoryStore(root);
     proposals = new ProposalStore(root);
     values = { ...memorySettings.schema.parse({}), captureEnabled: true, captureIdleMinutes: 5 };
-    capture = new Capture({ root, store, proposals, usage: new UsageLog(root), settings: async () => values });
+    repoPrefs = new RepoPrefs(root);
+    capture = new Capture({ root, store, proposals, usage: new UsageLog(root), repoPrefs, settings: async () => values });
     cwd = await repo();
     agent = { id: "agent-1", workspaceId: "ws-a", parentAgentId: null, provider: "codex", cwd, title: null };
   });
@@ -101,6 +104,20 @@ describe("capture", () => {
   });
 
   const reply = JSON.stringify({ facts: [{ type: "gotcha", subject: "integration tests", body: "Integration tests need DOCKER_HOST set.", paths: ["scripts/**"] }] });
+
+  it("follows a repo's capture setting over the host setting", async () => {
+    values = { ...values, captureEnabled: false };
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "on" });
+    const on = fakePaseo(conversation(5), reply);
+    capture.remember(on.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    values = { ...values, captureEnabled: true };
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "off" });
+    const off = fakePaseo(conversation(10), reply);
+    capture.remember(off.paseo);
+    expect(await capture.captureNow(agent)).toBe(0);
+    expect(off.created).toEqual([]);
+  });
 
   it("does nothing while capture is off", async () => {
     values = { ...values, captureEnabled: false };
@@ -271,7 +288,7 @@ describe("tidy limits", () => {
     const root = tempDir("tidy-");
     const store = new MemoryStore(root);
     const values = { ...memorySettings.schema.parse({}), captureMaxPerDay: 1 };
-    const capture = new Capture({ root, store, proposals: new ProposalStore(root), usage: new UsageLog(root), settings: async () => values });
+    const capture = new Capture({ root, store, proposals: new ProposalStore(root), usage: new UsageLog(root), repoPrefs: new RepoPrefs(root), settings: async () => values });
     const source = { by: "user" as const, provider: null, branch: null, commit: null };
     for (const subject of ["one", "two"]) await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject, body: subject, supersedes: null, source, citations: [] });
     const fake = fakePaseo([], "not json");

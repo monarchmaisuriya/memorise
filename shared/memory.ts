@@ -62,6 +62,16 @@ export const pathGlobSchema = z
 // Who a fact came from. "captured" means proposed from a session transcript and approved by the user.
 export const sourceKindSchema = z.enum(["agent", "user", "captured"]);
 
+// When a fact reaches a new agent's index. listed: ranked as usual. files: only when the worktree
+// changed a file matching its paths. title: the subject only; the agent reads the body with
+// memory_read. manual: never listed; found only by memory_search or memory_read. A pinned fact is
+// always listed in full.
+export const activationSchema = z.enum(["listed", "files", "title", "manual"]);
+export type Activation = z.infer<typeof activationSchema>;
+
+// A date (YYYY-MM-DD, UTC) after which agents no longer see a fact; null means no end date.
+export const untilSchema = z.iso.date().nullable();
+
 export const factSchema = z.object({
   id: factIdSchema,
   scope: scopeSchema,
@@ -74,6 +84,10 @@ export const factSchema = z.object({
   pinned: z.boolean().default(false),
   // Files the fact is about. Facts whose paths match files a worktree changed rank first.
   paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).default([]),
+  // Controls only the user sets, from the app; agent tools never change them.
+  activation: activationSchema.default("listed"),
+  enabled: z.boolean().default(true),
+  until: untilSchema.default(null),
   supersedes: factIdSchema.nullable(),
   created: z.iso.datetime(),
   modified: z.iso.datetime(),
@@ -93,9 +107,15 @@ export type FactListItem = z.infer<typeof factListItemSchema>;
 
 const directoryInput = z.object({ directory: z.string().min(1) });
 
+// Where a memory call acts: a workspace folder, whose repo comes from its git origin (the panel),
+// or a repo key directly (the manager). A null repo key means global memory only.
+export const whereSchema = z.union([z.object({ directory: z.string().min(1) }), z.object({ repoKey: repoKeySchema.nullable() })]);
+export type Where = z.infer<typeof whereSchema>;
+const whereInput = z.object({ where: whereSchema });
+
 export const listMemoriesRpc = defineRpc({
   name: "memory.list",
-  input: directoryInput,
+  input: whereInput,
   output: z.object({
     repoKey: repoKeySchema.nullable(),
     facts: z.array(
@@ -109,43 +129,162 @@ export const listMemoriesRpc = defineRpc({
 
 export const pinMemoryRpc = defineRpc({
   name: "memory.pin",
-  input: directoryInput.extend({ id: factIdSchema, pinned: z.boolean() }),
+  input: whereInput.extend({ id: factIdSchema, pinned: z.boolean() }),
   output: z.object({ fact: factSchema }),
 });
 
+const pathsInput = z.array(pathGlobSchema).max(MAX_PATH_GLOBS);
+
 export const saveMemoryRpc = defineRpc({
   name: "memory.save",
-  input: directoryInput.extend({
+  input: whereInput.extend({
     scope: scopeSchema,
     type: memoryTypeSchema,
     subject: subjectSchema,
     body: bodySchema,
+    paths: pathsInput.default([]),
+    pinned: z.boolean().default(false),
+    activation: activationSchema.default("listed"),
+    enabled: z.boolean().default(true),
+    until: untilSchema.default(null),
   }),
   output: z.object({ fact: factSchema }),
 });
 
+// Content fields make a new version; controls (activation, enabled, until) change in place.
 export const updateMemoryRpc = defineRpc({
   name: "memory.update",
-  input: directoryInput.extend({ id: factIdSchema, body: bodySchema }),
+  input: whereInput
+    .extend({
+      id: factIdSchema,
+      subject: subjectSchema.optional(),
+      body: bodySchema.optional(),
+      type: memoryTypeSchema.optional(),
+      paths: pathsInput.optional(),
+      activation: activationSchema.optional(),
+      enabled: z.boolean().optional(),
+      until: untilSchema.optional(),
+    })
+    .refine(
+      (input) => [input.subject, input.body, input.type, input.paths, input.activation, input.enabled, input.until].some((value) => value !== undefined),
+      "Give at least one of subject, body, type, paths, activation, enabled, or until to change",
+    ),
   output: z.object({ fact: factSchema }),
 });
 
 export const retireMemoryRpc = defineRpc({
   name: "memory.retire",
-  input: directoryInput.extend({ id: factIdSchema }),
+  input: whereInput.extend({ id: factIdSchema }),
   output: z.object({ fact: factSchema }),
 });
 
 export const restoreMemoryRpc = defineRpc({
   name: "memory.restore",
-  input: directoryInput.extend({ id: factIdSchema }),
+  input: whereInput.extend({ id: factIdSchema }),
   output: z.object({ fact: factSchema }),
 });
 
 export const deleteMemoryRpc = defineRpc({
   name: "memory.delete",
-  input: directoryInput.extend({ id: factIdSchema }),
+  input: whereInput.extend({ id: factIdSchema }),
   output: z.object({ deleted: z.literal(true) }),
+});
+
+// Global plus every repo with memory files, for the manager's repo list.
+export const listReposRpc = defineRpc({
+  name: "memory.repos",
+  input: z.object({}),
+  output: z.object({
+    repos: z.array(z.object({ repoKey: repoKeySchema.nullable(), active: z.number(), retired: z.number(), lastModified: z.string().nullable() })),
+  }),
+});
+
+// Full-text search over every current version, retired ones included; the manager filters further.
+export const searchMemoriesRpc = defineRpc({
+  name: "memory.search",
+  input: whereInput.extend({ query: z.string().trim().min(1).max(200) }),
+  output: z.object({ ids: z.array(factIdSchema) }),
+});
+
+export const memoryHistoryRpc = defineRpc({
+  name: "memory.history",
+  input: whereInput.extend({ id: factIdSchema }),
+  output: z.object({ versions: z.array(factListItemSchema) }),
+});
+
+export const revertMemoryRpc = defineRpc({
+  name: "memory.revert",
+  input: whereInput.extend({ id: factIdSchema, versionId: factIdSchema }),
+  output: z.object({ fact: factSchema }),
+});
+
+export const moveMemoryRpc = defineRpc({
+  name: "memory.move",
+  input: whereInput.extend({ id: factIdSchema, to: scopeSchema }),
+  output: z.object({ fact: factSchema }),
+});
+
+export const MAX_BULK_IDS = 200;
+export const bulkActionSchema = z.enum(["retire", "restore", "pin", "unpin", "enable", "disable", "delete"]);
+export type BulkAction = z.infer<typeof bulkActionSchema>;
+
+export const bulkMemoryRpc = defineRpc({
+  name: "memory.bulk",
+  input: whereInput.extend({ ids: z.array(factIdSchema).min(1).max(MAX_BULK_IDS), action: bulkActionSchema }),
+  output: z.object({ results: z.array(z.object({ id: factIdSchema, ok: z.boolean(), error: z.string().optional() })) }),
+});
+
+// The current, active memories of one repo (or global, for a null repo key).
+export const exportMemoryRpc = defineRpc({
+  name: "memory.export",
+  input: whereInput.extend({ format: z.enum(["markdown", "json"]) }),
+  output: z.object({ text: z.string(), count: z.number() }),
+});
+
+// Markdown lines or a JSON export. A dry run reports what would be added and writes nothing.
+export const importMemoryRpc = defineRpc({
+  name: "memory.import",
+  input: whereInput.extend({ scope: scopeSchema, text: z.string().min(1).max(200_000), dryRun: z.boolean() }),
+  output: z.object({
+    added: z.array(z.object({ type: memoryTypeSchema, subject: z.string() })),
+    skipped: z.array(z.object({ line: z.string(), reason: z.string() })),
+  }),
+});
+
+// Per-repo preferences, shared by every worktree of the repo. enabled false: new agents in the repo
+// get no memory and no memory tools. includeGlobal false: the repo's agents see no global memories.
+// capture: "default" follows the host setting; "on" or "off" overrides it for this repo.
+export const repoPrefsSchema = z.object({
+  enabled: z.boolean().default(true),
+  includeGlobal: z.boolean().default(true),
+  capture: z.enum(["default", "on", "off"]).default("default"),
+});
+export type RepoPrefsValue = z.infer<typeof repoPrefsSchema>;
+
+export const getRepoPrefsRpc = defineRpc({
+  name: "memory.repo-prefs.get",
+  input: z.object({ repoKey: repoKeySchema }),
+  output: z.object({ prefs: repoPrefsSchema }),
+});
+
+export const setRepoPrefsRpc = defineRpc({
+  name: "memory.repo-prefs.set",
+  input: z.object({ repoKey: repoKeySchema, prefs: repoPrefsSchema }),
+  output: z.object({ prefs: repoPrefsSchema }),
+});
+
+// What a new agent in this workspace would get now, built by the same code as the create hook.
+export const listReasonSchema = z.enum(["pinned", "files", "global", "repo"]);
+export const previewMemoryRpc = defineRpc({
+  name: "memory.preview",
+  input: directoryInput,
+  output: z.object({
+    repoKey: repoKeySchema.nullable(),
+    off: z.boolean(),
+    text: z.string(),
+    bytes: z.number(),
+    listed: z.array(z.object({ id: factIdSchema, subject: z.string(), reason: listReasonSchema, titleOnly: z.boolean() })),
+  }),
 });
 
 // A proposal is a change to memory that waits for the user: a new fact from a captured session, or a
