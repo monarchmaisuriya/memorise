@@ -32,7 +32,7 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 ## What agents can and cannot do
 
 - Through the memory tools, agents write only to their own repository's memories. Global memories come only from you, through `/remember --global` or the Memory panel. The files themselves belong to your user account, so a program or agent with shell access running as you could still edit them directly. Saved text is always shown to agents as quoted notes: it cannot add lines to the list or end it.
-- Agents can replace or retire a memory but never delete or pin one. A replaced memory is kept as history, and you can restore a retired one from the Memory panel.
+- Agents can replace or retire a memory but never delete, pin, move, turn off, or end-date one. A replaced memory is kept as history, and you can restore a retired one from the Memory panel.
 - Writes that look like they contain a secret (private keys, cloud and GitHub tokens, `password=` assignments, text inside `<private>` tags) are refused with the reason. Each repository allows at most 20 agent writes, replacements, and retirements per hour.
 - Reading memory is approved automatically; saving, changing, or retiring a memory asks you like any other tool, unless the agent runs in a mode that skips approvals (such as bypass or full access). You can turn automatic read approval off.
 - Every tool call is logged to `plugin-data/memorise/audit.jsonl` with time, repository, provider, tool, and memory id, but not the memory text. How often each memory was shown, read, and found is counted in `usage.jsonl` (ids only) and shown in the panel.
@@ -40,7 +40,10 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 ## Using it
 
 - `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>` in the composer saves a memory for the workspace's repository, or for all repositories with `--global`.
-- The Memorise workspace panel, also in the Command Center, lists memories for the workspace's repository plus global ones, with how often each was used. You can add, edit, pin, retire, restore, and delete them there, and review proposals.
+- The Memorise row in the sidebar opens the manager for global memory and every repository: search, filters, sort, bulk actions, a full editor, version history with revert, per-repository switches, and import/export (Markdown or JSON).
+- The Memorise workspace panel lists the workspace's repository memories plus global ones, links to the manager, and shows exactly what a new agent there would get, and why.
+- Each memory has controls only you set: when agents see it (listed, only for matching files, title only, or search only), on or off, and an optional end date.
+- Approve or reject captured memories from the chat card, or edit them in the panel's Proposed tab.
 - Settings > Plugins > Memorise: memory on or off for new agents, automatic read approval, how many memories go in the prompt, how long an agent-written memory that no agent has found or read stays listed (60 days by default; memories you saved or pinned never expire), the local port of the tool servers (6790 by default), and the capture and tidy options above.
 
 ## Limits

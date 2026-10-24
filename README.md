@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.1.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.2.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -64,9 +64,35 @@ Only agents created after the install get memory. Agents already running keep th
 ## Using it
 
 - **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's repository.
-- **Browse and edit:** open the Memorise workspace panel (also in the Command Center). It lists the repository's memories and the global ones, with how often each was shown, read, and found. You can add, edit, pin, retire, restore, and delete memories there.
-- **Review proposals:** the panel's Proposed tab lists what capture and tidy suggested. Edit the text or file paths, then approve or reject.
+- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager: global memory and every repository, each with search, filters (status, type, controls), sort, bulk actions (pin, turn on or off, retire, restore, delete), a full editor, version history with revert, and import/export. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
+- **Work inside a workspace:** the Memorise workspace panel lists the repository's memories and the global ones, with the same card and editor, and "Open in manager".
+- **See what agents get:** the panel's "What agents get" tab shows exactly what a new agent started in that workspace would be given, and why each memory is listed (pinned, about files this worktree changed, global, or this repo).
+- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the panel's Proposed tab.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
+
+### Per-memory controls
+
+Set in the editor; agents can never change them.
+
+| Control | Values | Effect |
+| --- | --- | --- |
+| When agents see it | Listed (default), Only for matching files, Title only, Search only | Listed: ranked into every new agent's list. Only for matching files: listed only when the worktree changed a file matching its paths (needs at least one path). Title only: listed by subject; the agent reads the text with `memory_read`. Search only: never listed, found only by `memory_search` |
+| On for agents | on (default) / off | Off hides it from agents' lists, search, and read without deleting it |
+| Until | a date, or empty (default) | After that day (UTC) agents no longer see it; the manager shows it as ended |
+
+A pinned memory is always listed in full. Editing the subject, text, type, or paths saves a new version (kept in History); changing a control does not.
+
+### Per-repository switches
+
+In the manager or the panel's "What agents get" tab, shared by every clone and worktree of the repository:
+
+- **Memory on / off:** off gives new agents in this repo no memories and no memory tools.
+- **Includes global memories / Repo memories only:** keeps your global memories out of this repo's agents (list, search, and read).
+- **Capture:** follow the host setting, or turn capture on or off for this repo only.
+
+### Import and export
+
+Export a repository's (or global) current memories as Markdown, one `- [type] subject: body` line each, or as JSON, which keeps paths and controls. Import either, or the `[date] - text` lines that assistant memory exports produce. Every entry passes the same checks as a memory you save (length, no secrets); duplicates are skipped and named, and "Check" shows what would be added before anything is written.
 
 ## Settings
 
@@ -115,6 +141,7 @@ Everything is stored as files on the daemon host, under `plugin-data/memorise/` 
 | `repos/<repo key>/<id>.md` | One repository memory per Markdown file, metadata in YAML frontmatter |
 | `global/<id>.md` | Global memories |
 | `proposals/` | Proposals waiting for review, and the hashes of rejected ones |
+| `repo-prefs.json` | Per-repository switches (memory on/off, include global, capture) |
 | `audit.jsonl` | Every tool call: time, repository, provider, tool, memory id (never the text) |
 | `usage.jsonl` | How often each memory was shown, read, and found (ids only) |
 | `index.sqlite` | Full-text search index; a cache rebuilt from the Markdown files |
@@ -142,7 +169,7 @@ Workers run in an empty folder of their own and are archived when they finish.
 ## What agents can and cannot do
 
 - Agents write only to their own repository's memories, never to global ones.
-- Agents can replace or retire a memory, but never delete or pin one. You can restore a retired memory from the panel.
+- Agents can replace or retire a memory, but never delete, pin, move, turn off, or end-date one, import memories, or change a repository's switches. You can restore a retired memory, or revert to an older version, from the manager.
 - Each repository allows at most 20 agent writes, replacements, and retirements per hour.
 - Saved text is always shown to agents as quoted notes, marked as notes to verify rather than instructions. It cannot add lines to the list or end it.
 - The files belong to your user account, so any program running as you, including an agent with shell access, could edit them directly.
