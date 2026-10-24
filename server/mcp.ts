@@ -140,7 +140,7 @@ export class MemoryMcp {
   // content hash. Paths are relative to the project root.
   private async pinCitations(scope: AgentScope, citations: { path: string; lines?: string }[], commit: string | null): Promise<Citation[]> {
     if (citations.length === 0) return [];
-    if (scope.repoKey && isFolderKey(scope.repoKey)) return this.pinToContent(scope.cwd, citations);
+    if (scope.repoKey && isFolderKey(scope.repoKey)) return this.pinToContent(scope.repoKey, scope.cwd, citations);
     const { cwd } = scope;
     if (!commit) throw new Error("This repo has no commit yet, so citations cannot be pinned. Save the fact without citations.");
     const pinned: Citation[] = [];
@@ -156,8 +156,10 @@ export class MemoryMcp {
     return pinned;
   }
 
-  private async pinToContent(cwd: string, citations: { path: string; lines?: string }[]): Promise<Citation[]> {
-    const { root } = await this.options.keys.resolve(cwd);
+  private async pinToContent(repoKey: string, cwd: string, citations: { path: string; lines?: string }[]): Promise<Citation[]> {
+    // Paths are hashed relative to the root of the project the memory is saved in, never another one.
+    const { key, root } = await this.options.keys.resolve(cwd);
+    if (key !== repoKey) throw new Error(`This folder now belongs to ${key}, not ${repoKey} as when this agent started, so its files cannot be cited here. Save the fact without citations, or start a new agent.`);
     const pinned: Citation[] = [];
     for (const citation of citations) {
       const path = normalizedPath(citation.path);

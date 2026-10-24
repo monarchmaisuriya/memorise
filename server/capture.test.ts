@@ -131,6 +131,15 @@ describe("capture", () => {
     expect(fake.created[0].config.provider).toBe("claude/claude-default");
   });
 
+  it("scans from the project's root when started in a subfolder of it", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev at the top.\n");
+    await mkdir(join(cwd, "src"));
+    const fake = fakePaseo([], JSON.stringify({ facts: [] }));
+    capture.remember(fake.paseo);
+    await (await capture.startScan(REPO, join(cwd, "src"), "create")).done;
+    expect(fake.created[0].prompt).toContain("Run make dev at the top.");
+  });
+
   it("re-checks saved memories against the project and proposes retiring a contradicted one", async () => {
     await writeFile(join(cwd, "README.md"), "Tests run with vitest.\n");
     const old = await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject: "tests", body: "Tests run with jest.", supersedes: null, source: { by: "user", provider: null, branch: null, commit: null }, citations: [] });

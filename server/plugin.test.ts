@@ -23,7 +23,7 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     registerProvider: () => undefined,
     registerUsageSource: () => undefined,
   } as unknown as PluginServerContext;
-  const workspaces: { workspaceDirectory?: string; projectRootPath: string }[] = [];
+  const workspaces: { workspaceDirectory?: string; projectRootPath: string; projectKind?: string }[] = [];
   const paseo = { agents: { ref: () => ({ respondToPermission }), list: async () => ({ entries: [] }) }, workspaces: {
       // One workspace per page, so a lookup must follow the cursor.
       list: async ({ page }: { page?: { cursor?: string } } = {}) => {
@@ -138,7 +138,9 @@ describe("memorise server entry", () => {
     errors.mockRestore();
     expect(config.systemPrompt).toContain("notes: Drafts live in drafts/.");
     expect(Object.keys(config.mcpServers)).toEqual(["paseo-memorise", "paseo-memorise-write"]);
-    // A workspace's folder is a project root, so an agent in a subfolder gets the same memories.
+    // A workspace's project folder outside git is a project root, so an agent in a subfolder gets the
+    // same memories.
+    fake.workspaces.push({ projectRootPath: plain, projectKind: "non_git" });
     await fake.workspaceCreated(plain);
     const sub = join(plain, "drafts");
     await mkdir(sub);
@@ -392,6 +394,16 @@ describe("memorise server entry", () => {
     for (const scanned of [where, { repoKey: "github.com/acme/web" }]) {
       await vi.waitFor(async () => expect((await fake.call("memory.proposals.list", { where: scanned })).lastRun).toMatchObject({ kind: "scan", state: "failed" }));
     }
+  });
+
+  it("gives the very first agent in a subfolder of a Paseo project outside git that project's memories", async () => {
+    const fake = start();
+    const site = tempDir("plugin-site-");
+    fake.workspaces.push({ projectRootPath: site, projectKind: "non_git" });
+    await fake.call("memory.save", { where: { directory: site }, scope: "repo", type: "howto", subject: "deploy", body: "Upload with rsync." });
+    const blog = join(site, "blog");
+    await mkdir(blog);
+    expect((await fake.create({ provider: "claude", cwd: blog })).config.systemPrompt).toContain("deploy: Upload with rsync.");
   });
 
   it("lists a folder memory meant for matching files once a matching file changed this week", async () => {

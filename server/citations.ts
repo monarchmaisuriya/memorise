@@ -1,6 +1,7 @@
 import type { FactListItem } from "../shared/memory";
 import { hashProjectFile } from "./file-hash";
 import { git } from "./git";
+import { ReadRefused } from "./safe-read";
 
 // For each fact whose cited code changed since it was saved, a short note for the index. A repo's
 // citations are checked with one `git diff` per distinct commit (not per fact), which keeps this
@@ -39,18 +40,22 @@ export async function checkCitations({ cwd, root }: { cwd: string; root: string 
   for (const fact of facts) {
     const hashed = fact.citations.filter((citation) => citation.hash !== undefined);
     if (hashed.length === 0 || notes.has(fact.id)) continue;
-    if (deadline - Date.now() <= 50) {
-      notes.set(fact.id, "citations not checked (time budget)");
-      continue;
-    }
-    const missing: string[] = [];
     const changed: string[] = [];
+    const missing: string[] = [];
+    const unchecked: string[] = [];
     for (const citation of hashed) {
-      const now = await hashProjectFile(root, citation.path).catch(() => null);
-      if (now === null) missing.push(citation.path);
-      else if (now !== citation.hash) changed.push(citation.path);
+      if (deadline - Date.now() <= 50) {
+        unchecked.push(`${citation.path} not checked (time budget)`);
+        continue;
+      }
+      try {
+        if ((await hashProjectFile(root, citation.path)) !== citation.hash) changed.push(citation.path);
+      } catch (error) {
+        if (error instanceof ReadRefused && error.missing) missing.push(citation.path);
+        else unchecked.push(`${citation.path} cannot be checked (${error instanceof Error ? error.message : String(error)})`);
+      }
     }
-    const parts = [...(changed.length > 0 ? [`${changed.join(", ")} changed since it was cited`] : []), ...(missing.length > 0 ? [`${missing.join(", ")} is missing`] : [])];
+    const parts = [...(changed.length > 0 ? [`${changed.join(", ")} changed since it was cited`] : []), ...(missing.length > 0 ? [`${missing.join(", ")} is missing`] : []), ...unchecked];
     if (parts.length > 0) notes.set(fact.id, parts.join("; "));
   }
   return notes;

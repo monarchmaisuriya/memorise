@@ -1,4 +1,5 @@
 import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import { repoKeySchema } from "../shared/memory";
@@ -35,16 +36,23 @@ function sameFolder(a: Identity, b: Identity): boolean {
 }
 
 // Decides which project a folder belongs to. A repo is found by git as before. A folder outside git
-// keeps the key it got when first seen, recorded in folders.json in the plugin data: found again by
-// its path; after a rename or a move on the same disk by its identity (only where the creation time is
-// known, so a reused inode is not mistaken for it); and from a subfolder through the nearest Paseo
-// project root above it. Folders where an agent merely ran claim nothing below them.
+// keeps the key it got when first seen, recorded in folders.json in the plugin data, and is found
+// again by its disk identity wherever it now is (a rename or a move on the same disk), or by its path
+// where the identity is unknown. A path once held by another folder whose identity is known is not
+// taken over: the order in which folders are seen never decides which folder owns a key.
+// From a subfolder, the nearest Paseo project root above it is the project, unless the subfolder
+// already has memories or proposals of its own. The home folder and the filesystem root are never
+// project roots, and a folder where an agent merely ran claims nothing below it.
 export class ProjectKeys {
   private readonly file: string;
   private entries: Entry[] | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(dataRoot: string) {
+  // hasData: whether a key already has memories or proposals, which keeps a folder its own project.
+  constructor(
+    dataRoot: string,
+    private readonly hasData: (key: string) => Promise<boolean> = async () => false,
+  ) {
     this.file = join(dataRoot, "folders.json");
   }
 
@@ -59,16 +67,21 @@ export class ProjectKeys {
     return (await this.resolve(cwd)).key;
   }
 
-  // Records a folder outside git as a project root (a Paseo project's folder). A repo needs nothing.
+  // Records a folder outside git as a project root (a Paseo project's folder). A repo needs nothing;
+  // the home folder and the filesystem root are refused, as they would gather unrelated folders.
   async markRoot(folder: string): Promise<void> {
     if (await readGitRepo(folder)) return;
     const real = await realpath(folder);
+    if (real === dirname(real) || real === (await realpath(homedir()).catch(() => homedir()))) {
+      console.log(`[memorise] ${real} is not taken as a project root: it would gather unrelated folders`);
+      return;
+    }
     await this.serialize(() => this.resolveFolder(real, true));
   }
 
   // A folder project's current name and path, for the manager.
   async label(key: string): Promise<{ name: string; path: string } | null> {
-    const entry = (await this.load()).find((candidate) => candidate.key === key);
+    const entry = (await this.serialize(() => this.load())).find((candidate) => candidate.key === key);
     return entry ? { name: basename(entry.path) || entry.path, path: entry.path } : null;
   }
 
@@ -76,30 +89,25 @@ export class ProjectKeys {
     const entries = await this.load();
     const identity = await identityOf(real);
     if (!identity) throw new Error(`${real} cannot be read, so its project is unknown`);
-    const known = (entry: Entry) => (asRoot && !entry.root ? this.save({ ...entry, root: true }) : Promise.resolve(entry));
-
-    const atPath = entries.find((entry) => entry.path === real);
-    if (atPath) {
-      // A folder made again at the same path is the same project.
-      const entry = await known(sameFolder(atPath, identity) ? atPath : await this.save({ ...atPath, ...identity }));
+    const known = identity.born !== "0";
+    const seen = (known ? entries.find((entry) => sameFolder(entry, identity)) : undefined) ?? entries.find((entry) => entry.path === real && (!known || entry.born === "0"));
+    if (seen) {
+      const entry = await this.save({ ...seen, ...identity, path: real, root: seen.root || asRoot });
+      if (!asRoot && !entry.root && !(await this.hasData(entry.key))) {
+        const root = await this.rootAbove(real, entries);
+        if (root) return root;
+      }
       return { key: entry.key, root: real };
     }
-    const moved = await this.movedEntry(entries, identity, () => true);
-    if (moved) return { key: (await known(await this.save({ ...moved, path: real }))).key, root: real };
-
     if (!asRoot) {
-      // Each folder above, nearest first, up to the filesystem root.
-      for (let dir = real; dir !== dirname(dir); ) {
-        dir = dirname(dir);
-        const root = entries.find((entry) => entry.root && entry.path === dir);
-        if (root) return { key: root.key, root: dir };
-        const dirIdentity = await identityOf(dir);
-        const movedRoot = dirIdentity ? await this.movedEntry(entries, dirIdentity, (entry) => entry.root) : null;
-        if (movedRoot) return { key: (await this.save({ ...movedRoot, path: dir })).key, root: dir };
+      // Memories already kept under this folder's first key (from 0.5.0) keep it its own project.
+      const first = folderKey(real);
+      const firstIsFree = !entries.some((entry) => entry.key === first);
+      if (!(firstIsFree && (await this.hasData(first)))) {
+        const root = await this.rootAbove(real, entries);
+        if (root) return root;
       }
     }
-
-    // A folder now at a path an older entry was first seen at gets a key of its own.
     const base = folderKey(real);
     let key = base;
     for (let n = 2; entries.some((entry) => entry.key === key); n += 1) key = `${base}-${n}`;
@@ -107,13 +115,19 @@ export class ProjectKeys {
     return { key, root: real };
   }
 
-  // An entry for this same folder seen at another path that no longer holds it: the folder moved.
-  private async movedEntry(entries: Entry[], identity: Identity, eligible: (entry: Entry) => boolean): Promise<Entry | null> {
-    if (identity.born === "0") return null;
-    for (const entry of entries) {
-      if (!eligible(entry) || !sameFolder(entry, identity)) continue;
-      const there = await identityOf(entry.path);
-      if (!there || !sameFolder(there, entry)) return entry;
+  // The nearest project root above a folder, found by identity (so a moved root is still found), or
+  // by path where its identity is unknown.
+  private async rootAbove(real: string, entries: Entry[]): Promise<Project | null> {
+    for (let dir = real; dir !== dirname(dir); ) {
+      dir = dirname(dir);
+      const identity = await identityOf(dir);
+      if (!identity) continue;
+      const known = identity.born !== "0";
+      const root = (known ? entries.find((entry) => entry.root && sameFolder(entry, identity)) : undefined) ?? entries.find((entry) => entry.root && entry.path === dir && (!known || entry.born === "0"));
+      if (root) {
+        if (root.path !== dir) await this.save({ ...root, path: dir });
+        return { key: root.key, root: dir };
+      }
     }
     return null;
   }
@@ -124,7 +138,11 @@ export class ProjectKeys {
       if (Reflect.get(Object(error), "code") === "ENOENT") return null;
       throw error;
     });
-    this.entries = text === null ? [] : registrySchema.parse(JSON.parse(text)).folders;
+    try {
+      this.entries = text === null ? [] : registrySchema.parse(JSON.parse(text)).folders;
+    } catch (error) {
+      throw new Error(`${this.file} could not be read (${error instanceof Error ? error.message : String(error)}); fix or remove it to give folders outside git their memory again`);
+    }
     return this.entries;
   }
 

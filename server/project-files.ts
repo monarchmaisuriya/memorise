@@ -1,5 +1,6 @@
-import { lstat, open, readdir, realpath } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { readdir, realpath } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { readInsideRoot, ReadRefused } from "./safe-read";
 import { redactSecrets } from "./secrets";
 
 export const MAX_FILE_BYTES = 8 * 1024;
@@ -21,25 +22,15 @@ const PACKAGE_FIELDS = ["name", "scripts", "engines", "packageManager", "workspa
 const MANIFESTS = ["package.json", "Makefile", "justfile", "pyproject.toml", "Cargo.toml", "go.mod", ".tool-versions", ".nvmrc"];
 const INSTRUCTIONS = ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"];
 
-// Only regular files with one link whose real path stays inside the repo: a symlink, a hard link, or
-// a file reached through a symlinked folder is never read. Only the start of a file is read, and a
-// file with a NUL byte there is taken as binary and skipped.
+// Read with readInsideRoot's rules (no symlinks or hard links, inside the root, the file checked is
+// the file read); a file with a NUL byte in what was read is taken as binary and skipped.
 async function readInside(root: string, path: string): Promise<{ text: string; cut: boolean } | null> {
-  const full = join(root, path);
-  const info = await lstat(full).catch(() => null);
-  if (!info?.isFile() || info.nlink > 1) return null;
-  const real = await realpath(full);
-  if (!real.startsWith(`${root}${sep}`)) return null;
-  const file = await open(real, "r");
-  try {
-    const buffer = Buffer.alloc(Math.min(info.size, READ_BYTES));
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    const bytes = buffer.subarray(0, bytesRead);
-    if (bytes.includes(0)) return null;
-    return { text: bytes.toString("utf8"), cut: info.size > bytesRead };
-  } finally {
-    await file.close();
-  }
+  const read = await readInsideRoot(root, path, READ_BYTES).catch((error: unknown) => {
+    if (error instanceof ReadRefused) return null;
+    throw error;
+  });
+  if (!read || read.bytes.includes(0)) return null;
+  return { text: read.bytes.toString("utf8"), cut: read.cut };
 }
 
 function capped(text: string, cut: boolean): string {

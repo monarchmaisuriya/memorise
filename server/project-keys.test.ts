@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ProjectKeys } from "./project-keys";
@@ -78,6 +79,64 @@ describe("project keys", () => {
     const lost = { key: "folder/old-0123456789ab", path: join(tempDir("keys-"), "gone"), dev: String(info.dev), ino: String(info.ino), born: String(info.birthtimeNs + 1n), root: false };
     await writeFile(join(data, "folders.json"), JSON.stringify({ version: 1, folders: [lost] }));
     expect((await new ProjectKeys(data).resolve(notes)).key).toBe(folderKey(notes));
+  });
+
+  it("keeps each folder's key when two folders swap paths, whichever is seen first", async () => {
+    const parent = tempDir("keys-");
+    for (const order of [["a", "x"], ["x", "a"]]) {
+      const keys = new ProjectKeys(tempDir("keys-data-"));
+      const base = await folder(parent, `swap-${order[0]}`);
+      const a = await folder(base, "a");
+      const b = await folder(base, "b");
+      const keyA = (await keys.resolve(a)).key;
+      const keyB = (await keys.resolve(b)).key;
+      await rename(a, join(base, "x"));
+      await rename(b, join(base, "a"));
+      const found = new Map<string, string>();
+      for (const name of order) found.set(name, (await keys.resolve(join(base, name))).key);
+      expect(found.get("a")).toBe(keyB);
+      expect(found.get("x")).toBe(keyA);
+    }
+  });
+
+  it("lets a subfolder seen before its root was marked follow the root, unless it has memories of its own", async () => {
+    const withData = new Set<string>();
+    const keys = new ProjectKeys(tempDir("keys-data-"), async (key) => withData.has(key));
+    const project = await folder(tempDir("keys-"), "site");
+    const blog = await folder(project, "blog");
+    const docs = await folder(project, "docs");
+    await keys.resolve(blog);
+    withData.add((await keys.resolve(docs)).key);
+    await keys.markRoot(project);
+    expect((await keys.resolve(blog)).key).toBe(folderKey(project));
+    expect((await keys.resolve(docs)).key).toBe(folderKey(docs));
+  });
+
+  it("keeps memories saved under a subfolder's first key (0.5.0) with that subfolder when its parent becomes a root", async () => {
+    const project = await folder(tempDir("keys-"), "work");
+    const client = await folder(project, "client-a");
+    const keys = new ProjectKeys(tempDir("keys-data-"), async (key) => key === folderKey(client));
+    await keys.markRoot(project);
+    expect(await keys.resolve(client)).toEqual({ key: folderKey(client), root: client });
+  });
+
+  it("never takes the home folder or the filesystem root as a project root", async () => {
+    const data = tempDir("keys-data-");
+    const keys = new ProjectKeys(data);
+    await keys.markRoot(homedir());
+    await keys.markRoot("/");
+    const saved = await readFile(join(data, "folders.json"), "utf8").catch(() => '{"folders":[]}');
+    expect(JSON.parse(saved).folders.filter((entry: { root: boolean }) => entry.root)).toEqual([]);
+  });
+
+  it("names the registry file when it cannot be read, and leaves repos working", async () => {
+    const data = tempDir("keys-data-");
+    await writeFile(join(data, "folders.json"), "{ broken");
+    const keys = new ProjectKeys(data);
+    await expect(keys.resolve(tempDir("keys-"))).rejects.toThrow(/folders\.json could not be read/);
+    const repo = tempDir("keys-repo-");
+    execFileSync("git", ["init", "-q", repo]);
+    expect((await keys.resolve(repo)).key).toMatch(/^local\//);
   });
 
   it("stores the registry as one JSON file in the plugin data", async () => {

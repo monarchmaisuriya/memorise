@@ -50,7 +50,7 @@ import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
 import { PathMatcher, recentFiles, workFiles } from "./work-files";
-import { openRepoCheckouts } from "./workspaces";
+import { markProjectRoots, openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
 
 const CITATION_BUDGET_MS = 1_000;
@@ -98,7 +98,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const usage = new UsageLog(root);
     const proposals = new ProposalStore(root);
     const repoPrefs = new RepoPrefs(root);
-    const keys = new ProjectKeys(root);
+    // A folder with memories or proposals of its own stays its own project under a later project root.
+    const keys = new ProjectKeys(root, async (key) => (await store.list(key)).some((fact) => fact.scope === "repo") || (await proposals.list(key)).length > 0);
     const capture = new Capture({ root, store, proposals, usage, repoPrefs, keys, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
     capture.startProjectScans();
@@ -163,6 +164,19 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { off: false as const, repoKey, section, ranked };
   }
 
+  // Project roots are recorded from Paseo's workspaces before the first agent's memory is prepared,
+  // so an agent in a subfolder of a project outside git gets the project's memory from the start.
+  let rootsKnown: Promise<void> | null = null;
+  function projectRootsKnown(paseo: PaseoApi): Promise<void> {
+    rootsKnown ??= runtime
+      .then(({ root, keys }) => markProjectRoots(paseo, root, keys))
+      .catch((error: unknown) => {
+        rootsKnown = null;
+        console.error(`[memorise] project roots could not be read from Paseo: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    return rootsKnown;
+  }
+
   server.before("agent.create", async ({ request }, { paseo }) => {
     const { config } = request;
     // Always drop what a parent agent passed down: a child may run in another repo.
@@ -181,6 +195,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       capture.remember(paseo);
       // The plugin's own capture and tidy workers get no memory and no memory tools.
       if (isWorkerRequest(root, config.cwd, request.env)) return { ...request, config: stripped };
+      await projectRootsKnown(paseo);
       const prepared = await prepareMemory(config.cwd, values);
       if (prepared.off) return { ...request, config: stripped };
       const { repoKey, section } = prepared;
@@ -220,12 +235,11 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // The hook returns at once: a scan takes longer than Paseo waits for a hook. Workspaces of the
   // plugin's own workers are never scanned.
   server.on("workspace.created", async ({ workspace }, { paseo }) => {
-    const { capture, keys } = await runtime;
+    const { capture, keys, root } = await runtime;
     capture.remember(paseo);
     if (capture.isWorker("", workspace.cwd)) return;
-    // A workspace's folder outside git is a project root: folders below it share its memory.
-    void keys
-      .markRoot(workspace.cwd)
+    // The new workspace's project may be a new project root: folders below it share its memory.
+    void markProjectRoots(paseo, root, keys)
       .then(() => keys.keyOf(workspace.cwd))
       .then((repoKey) => capture.scanIfDue(repoKey, workspace.cwd))
       .catch((error: unknown) => console.error(`[memorise] automatic project scan of ${workspace.cwd}: ${error instanceof Error ? error.message : String(error)}`));

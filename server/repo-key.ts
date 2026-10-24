@@ -61,8 +61,14 @@ export async function readGitRepo(cwd: string): Promise<{ key: string; top: stri
       if (error instanceof GitError && error.exitCode === 1) return "";
       throw error;
     });
-    // Absolute and symlink-free, so /var and /private/var on macOS give one key and one top level.
-    const top = await realpath(await git(cwd, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS));
+    // Absolute and symlink-free, so /var and /private/var on macOS give one key and one top level. A
+    // bare repo or a folder inside .git has no work tree; its own folder stands in for one.
+    const top = await realpath(
+      await git(cwd, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT_MS).catch((error: unknown) => {
+        if (error instanceof GitError && error.stderr.includes("must be run in a work tree")) return cwd;
+        throw error;
+      }),
+    );
     const fromRemote = remote === "" ? null : repoKeyFromRemote(remote);
     if (fromRemote) return { key: fromRemote, top };
     const commonDir = await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], GIT_TIMEOUT_MS);

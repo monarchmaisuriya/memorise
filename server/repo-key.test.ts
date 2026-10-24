@@ -51,6 +51,13 @@ describe("readGitRepo and folder keys", () => {
     for (const path of ["/", "/tmp/..x", "/tmp/~a", "/tmp/日本語", `/tmp/${"z".repeat(300)}`]) expect(repoKeySchema.safeParse(folderKey(path)).success).toBe(true);
   });
 
+  it("finds the repo from inside its .git folder, where there is no work tree", async () => {
+    const repo = tempDir("repo-");
+    initRepo(repo);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/api.git"]);
+    expect((await readGitRepo(join(repo, ".git")))?.key).toBe("github.com/acme/api");
+  });
+
   it("uses the origin remote, shared by every worktree", async () => {
     const repo = tempDir("repo-");
     initRepo(repo);

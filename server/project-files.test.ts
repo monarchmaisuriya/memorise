@@ -20,7 +20,7 @@ async function project(): Promise<string> {
 }
 
 describe("project reader", () => {
-  it("reads the fixed list of project files from the project root, never from folders below it", async () => {
+  it("reads the fixed list of project files from the root it is given", async () => {
     const root = await project();
     const files = await readProjectFiles(root);
     expect(files.map((file) => file.path)).toEqual(["AGENTS.md", "package.json", "README.md", "docs/deploy.md"]);

@@ -266,7 +266,9 @@ export class Capture {
       const paseo = this.paseo;
       if (!paseo) throw new Error("The plugin has not seen Paseo yet; open an agent and try again");
       const values = await this.deps.settings();
-      const files = await readProjectFiles((await this.deps.keys.resolve(cwd)).root);
+      const project = await this.deps.keys.resolve(cwd);
+      if (project.key !== repoKey) throw new Error(`${cwd} belongs to ${project.key}, not ${repoKey}`);
+      const files = await readProjectFiles(project.root);
       if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
       await this.requireRun(`project scan of ${repoKey}`, values.captureMaxPerDay);
       const startedAt = new Date().toISOString();
@@ -278,7 +280,8 @@ export class Capture {
           const entry = state.scans[repoKey];
           if (entry?.startedAt === startedAt) entry[outcome] = new Date().toISOString();
         });
-      const run = this.track(repoKey, "scan", this.runScan(paseo, repoKey, mode, files, values), ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`).then(
+      // The outcome is saved before the inbox is told, so the two never disagree.
+      const recorded = this.runScan(paseo, repoKey, mode, files, values).then(
         async (result) => {
           await finish("okAt");
           return result;
@@ -288,6 +291,7 @@ export class Capture {
           throw error;
         },
       );
+      const run = this.track(repoKey, "scan", recorded, ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`);
       return { done: run.finally(() => this.scanning.delete(repoKey)) };
     } catch (error) {
       this.scanning.delete(repoKey);
@@ -443,7 +447,9 @@ export class Capture {
   }
 
   private async runTidy(paseo: PaseoApi, repoKey: string, cwd: string | null, facts: FactListItem[], values: MemorySettings): Promise<number> {
-    const notes = cwd ? await checkCitations({ cwd, root: (await this.deps.keys.resolve(cwd)).root }, facts, 2_000) : new Map<string, string>();
+    // Citations are checked only against a checkout of this same project.
+    const project = cwd ? await this.deps.keys.resolve(cwd).catch(() => null) : null;
+    const notes = cwd && project?.key === repoKey ? await checkCitations({ cwd, root: project.root }, facts, 2_000) : new Map<string, string>();
     const counts = await this.deps.usage.counts();
     const listed = facts.slice(0, 200).map((fact) => {
       const usage = usageOf(counts, fact.id);

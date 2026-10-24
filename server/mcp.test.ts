@@ -38,11 +38,13 @@ describe("memory MCP servers", () => {
   let http: Server;
   let port: number;
   let clients: Client[];
+  let keys: ProjectKeys;
 
   beforeEach(async () => {
     store = new MemoryStore(tempDir("memorise-"));
     tokens = new TokenAuthority(randomBytes(32));
-    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), keys: new ProjectKeys(store.root), expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
+    keys = new ProjectKeys(store.root);
+    http = await new MemoryMcp({ store, tokens, search: new SearchIndex(store.root), usage: new UsageLog(store.root), keys, expiryDays: async () => 60, includeGlobal: async () => true }).listen(0);
     port = (http.address() as AddressInfo).port;
     clients = [];
   });
@@ -160,7 +162,7 @@ describe("memory MCP servers", () => {
     await mkdir(join(plain, "notes"));
     await writeFile(join(plain, "notes", "plan.md"), "Day one.\n");
     await symlink(join(plain, "notes", "plan.md"), join(plain, "link.md"));
-    const project = await new ProjectKeys(store.root).resolve(plain);
+    const project = await keys.resolve(plain);
     const writer = await connect("write", bearer({ repoKey: project.key, cwd: plain, provider: "claude" }));
     expect((await call(writer, "memory_write", { type: "howto", subject: "x", fact: "y", citations: [{ path: "link.md" }] })).text).toMatch(/not a regular file/);
     expect((await call(writer, "memory_write", { type: "howto", subject: "x", fact: "y", citations: [{ path: "notes/missing.md" }] })).text).toMatch(/does not exist/);
@@ -172,6 +174,19 @@ describe("memory MCP servers", () => {
     expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md changed since it was cited"]]));
     await rm(join(plain, "notes", "plan.md"));
     expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md is missing"]]));
+  });
+
+  it("refuses to cite files in a folder that belongs to another project than when the agent started", async () => {
+    const outer = tempDir("mcp-outer-");
+    const inner = join(outer, "inner");
+    await mkdir(inner);
+    await writeFile(join(inner, "a.md"), "A\n");
+    await keys.markRoot(outer);
+    const started = await keys.resolve(inner);
+    const writer = await connect("write", bearer({ repoKey: started.key, cwd: inner, provider: "claude" }));
+    expect((await call(writer, "memory_write", { type: "howto", subject: "a", fact: "A file.", citations: [{ path: "inner/a.md" }] })).isError).toBe(false);
+    await keys.markRoot(inner);
+    expect((await call(writer, "memory_write", { type: "howto", subject: "b", fact: "B file.", citations: [{ path: "a.md" }] })).text).toMatch(/now belongs to/);
   });
 
   it("counts a search hit as use", async () => {
