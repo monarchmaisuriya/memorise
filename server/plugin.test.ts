@@ -393,4 +393,23 @@ describe("memorise server entry", () => {
       { repoKey: "github.com/acme/api", active: 2 },
     ]);
   });
+
+  it("lists repos with an open workspace or only proposals beside those with memories, each once", async () => {
+    const fake = start();
+    await fake.call("memory.save", { where: { repoKey: "github.com/acme/api" }, scope: "repo", type: "howto", subject: "build", body: "Run make build." });
+    const api = await repoWithOrigin("git@github.com:acme/api.git");
+    const web = await repoWithOrigin("git@github.com:acme/web.git");
+    const notGit = tempDir("plugin-plain-");
+    // One workspace per page in the fake, so the web workspace is on the third page.
+    fake.workspaces.push({ workspaceDirectory: api, projectRootPath: api }, { projectRootPath: notGit }, { projectRootPath: web });
+    const source = { from: "capture" as const, agentId: null, provider: "claude", model: null };
+    await new ProposalStore(root).add([{ repoKey: "github.com/acme/docs", kind: "new", targets: [], type: "howto", subject: "docs", body: "Docs build with mkdocs.", paths: [], reason: "", source }], []);
+    const { repos } = await fake.call("memory.repos", {});
+    expect(repos).toEqual([
+      { repoKey: null, active: 0, retired: 0, lastModified: null },
+      { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String) },
+      { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null },
+      { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null },
+    ]);
+  });
 });

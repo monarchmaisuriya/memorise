@@ -307,7 +307,16 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(setRepoPrefsRpc, async ({ repoKey, prefs }) => ({ prefs: await (await runtime).repoPrefs.set(repoKey, prefs) }));
 
-  server.handle(listReposRpc, async () => ({ repos: await (await runtime).store.summaries() }));
+  // Every repo the manager can work on: those with memories (with counts), those with an open Paseo
+  // workspace, and those with proposals waiting. Global comes first, then repos by key.
+  server.handle(listReposRpc, async (_input, { paseo }) => {
+    const { store, proposals } = await runtime;
+    const [withMemories, open, waiting] = await Promise.all([store.summaries(), openRepoCheckouts(paseo), proposals.summary()]);
+    const known = new Set(withMemories.map((repo) => repo.repoKey));
+    const others = [...new Set([...open.keys(), ...waiting.map((repo) => repo.repoKey)])].filter((repoKey) => !known.has(repoKey));
+    const repos = [...withMemories, ...others.map((repoKey) => ({ repoKey, active: 0, retired: 0, lastModified: null }))];
+    return { repos: repos.sort((a, b) => (a.repoKey === null ? -1 : b.repoKey === null ? 1 : a.repoKey.localeCompare(b.repoKey))) };
+  });
 
   server.handle(searchMemoriesRpc, async ({ where, query }) => {
     const [{ store, search }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
@@ -386,6 +395,28 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(proposalsSummaryRpc, async () => ({ repos: await (await runtime).proposals.summary() }));
 
+  // The repo of every open Paseo workspace, across every page, with one checkout of each. A project's
+  // main checkout is preferred over a worktree of a branch; a folder that is gone or not in git is
+  // skipped.
+  async function openRepoCheckouts(paseo: PaseoApi): Promise<Map<string, string>> {
+    const checkouts = new Map<string, string>();
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const { entries, pageInfo } = await paseo.workspaces.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+      for (const workspace of entries) {
+        for (const folder of [workspace.projectRootPath, workspace.workspaceDirectory]) {
+          if (!folder || seen.has(folder)) continue;
+          seen.add(folder);
+          const repoKey = await readRepoKey(folder).catch(() => null);
+          if (repoKey && !checkouts.has(repoKey)) checkouts.set(repoKey, folder);
+        }
+      }
+      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
+    } while (cursor);
+    return checkouts;
+  }
+
   // A checkout to read for a project scan: the given workspace folder, or the folder of an open
   // workspace that belongs to the repo.
   async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
@@ -395,17 +426,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       return { repoKey, folder: where.directory };
     }
     if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
-    // Every page of workspaces; a project's main checkout is preferred over a worktree of a branch.
-    let cursor: string | undefined;
-    do {
-      const { entries, pageInfo } = await paseo.workspaces.list({ page: { limit: 200, ...(cursor ? { cursor } : {}) } });
-      for (const workspace of entries) {
-        for (const folder of [workspace.projectRootPath, workspace.workspaceDirectory]) {
-          if (folder && (await readRepoKey(folder).catch(() => null)) === where.repoKey) return { repoKey: where.repoKey, folder };
-        }
-      }
-      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
-    } while (cursor);
+    const folder = (await openRepoCheckouts(paseo)).get(where.repoKey);
+    if (folder) return { repoKey: where.repoKey, folder };
     throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
   }
 

@@ -293,7 +293,8 @@ export function ManagerScreen(props: PluginScreenProps) {
   const isRepo = (key: string | undefined): key is string => !!key && key !== GLOBAL && key !== ATTENTION_VIEW && key !== SETTINGS_VIEW && key !== PROPOSALS_VIEW;
   const missing = [...new Set([params.repo, view])].filter((key): key is string => isRepo(key) && !listed.some((repo) => repo.repoKey === key));
   const shownRepos = [...listed, ...missing.map((key) => ({ repoKey: key, active: 0, retired: 0, lastModified: null }))];
-  const all = useAllFacts(listed.map((repo) => repo.repoKey));
+  // Repos listed only for an open workspace or proposals have no memories to load or tidy.
+  const all = useAllFacts(listed.filter((repo) => repo.repoKey === null || repo.active + repo.retired > 0).map((repo) => repo.repoKey));
   const attentionCount = Object.values(attentionGroups(all.facts)).reduce((sum, items) => sum + (items?.length ?? 0), 0);
 
   const repoEntries = shownRepos.map((repo) => ({
@@ -345,7 +346,7 @@ export function ManagerScreen(props: PluginScreenProps) {
           proposals.error ? (
             <Text style={styles.danger}>{proposals.error.message}</Text>
           ) : (
-            <ProposalsView pending={proposals.data?.repos ?? []} repoKeys={listed.flatMap((repo) => (repo.repoKey ? [repo.repoKey] : []))} styles={styles} />
+            <ProposalsView pending={proposals.data?.repos ?? []} repoKeys={listed.flatMap((repo) => (repo.repoKey && repo.active >= 2 ? [repo.repoKey] : []))} styles={styles} />
           )
         ) : view === ATTENTION_VIEW ? (
           all.error ? <Text style={styles.danger}>{all.error.message}</Text> : all.pending ? <Text style={styles.muted}>Loading memories</Text> : <AttentionView facts={all.facts} styles={styles} />
