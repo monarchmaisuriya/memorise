@@ -42,7 +42,7 @@ export function MemoryPanel({ theme, layout, workspaceId, openManager }: PluginW
         <Button label="Open in manager" styles={styles} onPress={() => openManager(repoKey)} />
       </View>
       {tab === "proposed" && repoKey ? (
-        <Inbox directory={directory} styles={styles} onChanged={refresh} />
+        <Inbox where={where} styles={styles} onChanged={refresh} />
       ) : tab === "agents" ? (
         <>
           {repoKey && <RepoPrefsCard repoKey={repoKey} styles={styles} />}

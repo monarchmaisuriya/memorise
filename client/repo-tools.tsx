@@ -118,12 +118,15 @@ export function PreviewCard({ directory, styles }: { directory: string; styles: 
   const [showText, setShowText] = useState(false);
   if (query.isPending) return <Text style={styles.muted}>Building the preview</Text>;
   if (query.error) return <Text style={styles.danger}>{query.error.message}</Text>;
-  const { off, listed, bytes, text } = query.data;
+  const { off, listed, bytes, text, maxLines, maxBytes } = query.data;
   if (off) return <Text style={styles.muted}>Memory is off for this repo: new agents get no memories and no memory tools.</Text>;
   return (
     <View style={styles.card}>
       <Text style={styles.body}>
-        A new agent here gets {listed.length} {listed.length === 1 ? "memory" : "memories"} ({bytes} bytes)
+        A new agent here gets {listed.length} {listed.length === 1 ? "memory" : "memories"}
+      </Text>
+      <Text style={styles.muted}>
+        Prompt budget: {listed.length} of {maxLines} lines · {(bytes / 1024).toFixed(1)} of {(maxBytes / 1024).toFixed(0)} KB
       </Text>
       {listed.map((item) => (
         <Text key={item.id} style={styles.muted}>

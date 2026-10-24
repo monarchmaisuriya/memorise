@@ -35,6 +35,8 @@ export function FactEditor({ where, fact, defaultScope, hasRepo, styles, onDone 
   const [activation, setActivation] = useState<Activation>(fact?.activation ?? "listed");
   const [enabled, setEnabled] = useState(fact?.enabled ?? true);
   const [until, setUntil] = useState(fact?.until ?? "");
+  // The options start open when a memory already uses one, so nothing set is ever hidden.
+  const [options, setOptions] = useState(Boolean(fact && (fact.paths.length > 0 || fact.activation !== "listed" || !fact.enabled || fact.until)));
   const mutation = useMutation({
     mutationFn: async () => {
       const values = { subject: subject.trim(), body: body.trim(), type, paths: splitPaths(paths), activation, enabled, until: until.trim() === "" ? null : until.trim() };
@@ -65,20 +67,29 @@ export function FactEditor({ where, fact, defaultScope, hasRepo, styles, onDone 
           <Chip label="Pinned" on={pinned} onPress={() => setPinned((value) => !value)} styles={styles} />
         </View>
       )}
-      <Text style={styles.muted}>About files (globs, comma-separated; empty for none)</Text>
-      <TextInput accessibilityLabel="Memory file paths" value={paths} onChangeText={setPaths} placeholder="src/api/**" style={[styles.input, { minHeight: 0 }]} />
-      <Text style={styles.muted}>When agents see it</Text>
       <View style={styles.row}>
-        {activationSchema.options.map((option) => (
-          <Chip key={option} label={ACTIVATION_LABEL[option]} on={activation === option} onPress={() => setActivation(option)} styles={styles} />
-        ))}
+        <Pressable accessibilityRole="button" accessibilityLabel={options ? "Hide memory options" : "Show memory options"} onPress={() => setOptions((value) => !value)} style={styles.button}>
+          <Text style={styles.chipText}>{options ? "Hide options" : "Options: files, when agents see it, on/off, end date"}</Text>
+        </Pressable>
       </View>
-      <Text style={styles.muted}>{ACTIVATION_HINT[activation]}</Text>
-      <View style={styles.row}>
-        <Chip label={enabled ? "On for agents" : "Off for agents"} on={enabled} onPress={() => setEnabled((value) => !value)} styles={styles} />
-        <Text style={styles.muted}>Until (YYYY-MM-DD, empty for no end)</Text>
-        <TextInput accessibilityLabel="Memory end date" value={until} onChangeText={setUntil} placeholder="2027-01-31" style={[styles.input, { minHeight: 0, minWidth: 120 }]} />
-      </View>
+      {options && (
+        <>
+          <Text style={styles.muted}>About files (globs, comma-separated; empty for none)</Text>
+          <TextInput accessibilityLabel="Memory file paths" value={paths} onChangeText={setPaths} placeholder="src/api/**" style={[styles.input, { minHeight: 0 }]} />
+          <Text style={styles.muted}>When agents see it</Text>
+          <View style={styles.row}>
+            {activationSchema.options.map((option) => (
+              <Chip key={option} label={ACTIVATION_LABEL[option]} on={activation === option} onPress={() => setActivation(option)} styles={styles} />
+            ))}
+          </View>
+          <Text style={styles.muted}>{ACTIVATION_HINT[activation]}</Text>
+          <View style={styles.row}>
+            <Chip label={enabled ? "On for agents" : "Off for agents"} on={enabled} onPress={() => setEnabled((value) => !value)} styles={styles} />
+            <Text style={styles.muted}>Until (YYYY-MM-DD, empty for no end)</Text>
+            <TextInput accessibilityLabel="Memory end date" value={until} onChangeText={setUntil} placeholder="2027-01-31" style={[styles.input, { minHeight: 0, minWidth: 120 }]} />
+          </View>
+        </>
+      )}
       {mutation.error && <Text style={styles.danger}>{mutation.error.message}</Text>}
       <View style={styles.row}>
         <Pressable
