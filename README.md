@@ -24,7 +24,15 @@ The plugin's id in Paseo is `memorise`.
 
 ## Install
 
-Clone the repository on the machine that runs the Paseo daemon, install its dependencies, and install the folder as a plugin:
+Install straight from GitHub:
+
+```bash
+paseo plugin add git:monarchmaisuriya/memorise
+```
+
+Paseo clones the repository and runs the manifest's `build` command, `npm ci --omit=dev --ignore-scripts`, which installs only the runtime packages from the committed lock file. To pin a version, add `--ref <tag or commit>`.
+
+To work on the code instead, clone it and install the folder; Paseo then runs the plugin from your clone:
 
 ```bash
 git clone https://github.com/monarchmaisuriya/memorise.git
