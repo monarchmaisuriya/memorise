@@ -49,10 +49,10 @@ export function Badge({ label, styles }: { label: string; styles: Styles }) {
   );
 }
 
-export function Button({ label, onPress, styles, tone }: { label: string; onPress(): void; styles: Styles; tone?: "danger" }) {
+export function Button({ label, onPress, styles, tone, disabled = false }: { label: string; onPress(): void; styles: Styles; tone?: "danger"; disabled?: boolean }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.button}>
-      <Text style={tone === "danger" ? styles.danger : styles.chipText}>{label}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={styles.button}>
+      <Text style={disabled ? styles.muted : tone === "danger" ? styles.danger : styles.chipText}>{label}</Text>
     </Pressable>
   );
 }

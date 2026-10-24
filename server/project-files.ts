@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { git } from "./git";
 import { redactSecrets } from "./secrets";
@@ -6,6 +6,10 @@ import { redactSecrets } from "./secrets";
 export const MAX_FILE_BYTES = 8 * 1024;
 export const MAX_TOTAL_BYTES = 64 * 1024;
 const MAX_DOCS = 8;
+// Read past the cap so a secret cut at the boundary is still whole when redaction runs.
+const READ_BYTES = MAX_FILE_BYTES + 1024;
+// Doc names go into the prompt's fence labels, so only plain names are read.
+const DOC_NAME = /^[\w.-]+\.md$/i;
 
 export interface ProjectFile {
   path: string;
@@ -24,20 +28,30 @@ async function repoRoot(cwd: string): Promise<string> {
   return realpath(top);
 }
 
-// Only regular files whose real path stays inside the repo: a symlink, or a file reached through a
-// symlinked folder, is never read.
-async function readInside(root: string, path: string): Promise<string | null> {
+// Only regular files with one link whose real path stays inside the repo: a symlink, a hard link, or
+// a file reached through a symlinked folder is never read. Only the start of a file is read, and a
+// file with a NUL byte there is taken as binary and skipped.
+async function readInside(root: string, path: string): Promise<{ text: string; cut: boolean } | null> {
   const full = join(root, path);
   const info = await lstat(full).catch(() => null);
-  if (!info?.isFile()) return null;
+  if (!info?.isFile() || info.nlink > 1) return null;
   const real = await realpath(full);
   if (!real.startsWith(`${root}${sep}`)) return null;
-  return readFile(real, "utf8");
+  const file = await open(real, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(info.size, READ_BYTES));
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const bytes = buffer.subarray(0, bytesRead);
+    if (bytes.includes(0)) return null;
+    return { text: bytes.toString("utf8"), cut: info.size > bytesRead };
+  } finally {
+    await file.close();
+  }
 }
 
-function capped(text: string): string {
+function capped(text: string, cut: boolean): string {
   const bytes = Buffer.from(text);
-  return bytes.length <= MAX_FILE_BYTES ? text : `${bytes.subarray(0, MAX_FILE_BYTES).toString("utf8")}\n[cut at 8 KB]`;
+  return bytes.length <= MAX_FILE_BYTES && !cut ? text : `${bytes.subarray(0, MAX_FILE_BYTES).toString("utf8")}\n[cut at 8 KB]`;
 }
 
 // package.json is mostly dependencies; only the parts that say how to work in the repo are kept.
@@ -54,22 +68,24 @@ async function namesMatching(dir: string, pattern: RegExp): Promise<string[]> {
   return (await readdir(dir).catch(() => [] as string[])).filter((name) => pattern.test(name)).sort();
 }
 
-// The fixed list of project files a scan reads, in order, under per-file and total caps, with
-// secret-shaped text removed.
+// The fixed list of project files a scan reads, under per-file and total caps, with secret-shaped
+// text removed. Instruction files and manifests come first, as they are short and the scan needs them
+// most; a file that would pass the total cap is left out and the smaller ones after it still fit.
 export async function readProjectFiles(cwd: string): Promise<ProjectFile[]> {
   const root = await repoRoot(cwd);
   const readme = (await namesMatching(root, /^readme(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
   const contributing = (await namesMatching(root, /^contributing(\.(md|markdown|txt|rst))?$/i)).slice(0, 1);
-  const docs = (await namesMatching(join(root, "docs"), /\.md$/i)).slice(0, MAX_DOCS).map((name) => `docs/${name}`);
-  const paths = [...readme, ...contributing, ...docs, ...MANIFESTS];
+  const docs = (await namesMatching(join(root, "docs"), DOC_NAME)).slice(0, MAX_DOCS).map((name) => `docs/${name}`);
+  const paths = [...MANIFESTS, ...readme, ...contributing, ...docs];
   const files: ProjectFile[] = [];
   let total = 0;
-  for (const [path, instructions] of [...paths.map((path) => [path, false] as const), ...INSTRUCTIONS.map((path) => [path, true] as const)]) {
+  for (const [path, instructions] of [...INSTRUCTIONS.map((path) => [path, true] as const), ...paths.map((path) => [path, false] as const)]) {
     const raw = await readInside(root, path);
-    if (raw === null || raw.trim() === "") continue;
-    const text = capped(redactSecrets(path === "package.json" ? packageSummary(raw) : raw));
+    if (raw === null || raw.text.trim() === "") continue;
+    // A cut package.json is not JSON, so it is sent as text.
+    const text = capped(redactSecrets(path === "package.json" && !raw.cut ? packageSummary(raw.text) : raw.text), raw.cut);
+    if (total + Buffer.byteLength(text) > MAX_TOTAL_BYTES) continue;
     total += Buffer.byteLength(text);
-    if (total > MAX_TOTAL_BYTES) break;
     files.push({ path: relative(root, join(root, path)), text, instructions });
   }
   return files;

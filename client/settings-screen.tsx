@@ -16,7 +16,7 @@ const MEMORY_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: strin
 const CAPTURE_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: string }> = [
   { key: "captureIdleMinutes", label: "Capture after the agent is idle for (minutes)", hint: "5 to 240. Each new turn restarts the wait." },
   { key: "captureMinUserMessages", label: "Capture once you have sent at least this many new messages", hint: "Counted since the last capture of that session. 1 to 50." },
-  { key: "captureMaxPerDay", label: "Background runs per day, at most (capture and tidy)", hint: "1 to 100. Each run is one model call." },
+  { key: "captureMaxPerDay", label: "Background runs per day, at most (capture, tidy, and project scans)", hint: "1 to 100. Each run is one model call." },
 ];
 const CAPTURE_TEXTS: ReadonlyArray<{ key: TextKey; label: string; hint: string }> = [
   { key: "captureModel", label: "Capture model", hint: "Used only when one provider reads every session. Empty, or with \"Same as the session\", each provider's default model is used." },

@@ -1,6 +1,6 @@
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, scanProjectRpc, tidyMemoryRpc, type Where } from "../shared/memory";
@@ -77,7 +77,13 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
   const tidy = useRpc(tidyMemoryRpc);
   const settings = useSettings(memorySettings);
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["memorise-proposals", where], queryFn: () => list({ where }) });
+  // While a tidy or project scan runs, the list is fetched again every few seconds, so its outcome and
+  // its proposals appear without pressing Refresh.
+  const query = useQuery({
+    queryKey: ["memorise-proposals", where],
+    queryFn: () => list({ where }),
+    refetchInterval: (current) => (current.state.data?.lastRun?.state === "running" ? 5_000 : false),
+  });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] });
     onChanged();
@@ -88,7 +94,18 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
   const approve = useRpc(approveProposalRpc);
   const reject = useRpc(rejectProposalRpc);
   const scanRun = useMutation({ mutationFn: (mode: "create" | "refresh") => scan({ where, mode }) });
-  const [confirmRejectAll, setConfirmRejectAll] = useState(false);
+  // "Approve all" and "Reject all" each ask once, and then decide exactly the proposals that were shown
+  // when asked; the question is dropped when the list changes.
+  const [confirmAll, setConfirmAll] = useState<{ approved: boolean; ids: string[] } | null>(null);
+  const shownIds = query.data?.proposals.map((proposal) => proposal.id).join(",") ?? "";
+  useEffect(() => setConfirmAll(null), [shownIds]);
+  // When a run finishes, its proposals and any memories it saved automatically are shown everywhere.
+  const runState = query.data?.lastRun?.state;
+  const previousRunState = useRef(runState);
+  useEffect(() => {
+    if (previousRunState.current === "running" && runState !== "running") refresh();
+    previousRunState.current = runState;
+  });
   // Each proposal is applied on its own, so one that fails does not stop the rest; failures are listed.
   const decideAll = useMutation({
     mutationFn: async ({ ids, approved }: { ids: string[]; approved: boolean }) => {
@@ -104,7 +121,7 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
       return failed;
     },
     onSettled: () => {
-      setConfirmRejectAll(false);
+      setConfirmAll(null);
       refresh();
     },
   });
@@ -112,6 +129,9 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
   if (query.isPending) return <Text style={styles.muted}>Loading proposals</Text>;
   if (query.error) return <Text style={styles.danger}>{query.error.message}</Text>;
   const captureOn = settings.status === "ready" && settings.values.captureEnabled;
+  const lastRun = query.data.lastRun;
+  const running = lastRun?.state === "running";
+  const proposals = query.data.proposals;
   return (
     <View style={{ gap: 12 }}>
       {controls && (
@@ -122,37 +142,52 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
           : "Capture is off. Turn it on in Settings (in the manager, or Settings > Plugins > Memorise) to have finished sessions propose memories."}
       </Text>
       <View style={styles.row}>
-        <Button label="Create from project" styles={styles} onPress={() => scanRun.mutate("create")} />
-        <Button label="Re-check against project" styles={styles} onPress={() => scanRun.mutate("refresh")} />
-        <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} styles={styles} onPress={() => tidyRun.mutate()} />
+        <Button label="Create from project" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("create")} />
+        <Button label="Re-check against project" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("refresh")} />
+        <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} disabled={running || tidyRun.isPending} styles={styles} onPress={() => tidyRun.mutate()} />
         <Button label="Refresh" styles={styles} onPress={refresh} />
       </View>
-      <Text style={styles.muted}>A project scan reads the README, docs, and build files (not the instruction files' content), with the tidy provider, and proposes memories; re-check also proposes fixing saved ones the files contradict.</Text>
-      {scanRun.isSuccess && <Text style={styles.muted}>Scan started on {scanRun.data.folder}. Its proposals appear here in a few minutes; press Refresh.</Text>}
+      <Text style={styles.muted}>A project scan sends the README, docs, and build files to the tidy provider and proposes memories; re-check also proposes fixing saved ones the files contradict. AGENTS.md and CLAUDE.md are sent too, only so it leaves out what agents already read.</Text>
+      {scanRun.isSuccess && <Text style={styles.muted}>Scan started on {scanRun.data.folder}.</Text>}
       {scanRun.error && <Text style={styles.danger}>{scanRun.error.message}</Text>}
+      {lastRun && (
+        <Text style={lastRun.state === "failed" ? styles.danger : styles.muted}>
+          {lastRun.kind === "scan" ? "Project scan" : "Tidy"}{" "}
+          {lastRun.state === "running" ? "running; its proposals appear here when it finishes." : lastRun.state === "failed" ? `failed: ${lastRun.message}` : `finished: ${lastRun.message}.`}
+        </Text>
+      )}
       {"repoKey" in where && <Text style={styles.muted}>From the manager, tidy cannot check citations against a checkout; run it from a workspace's panel to include that check.</Text>}
-      {tidyRun.isSuccess && <Text style={styles.muted}>Tidy started. Its proposals appear here in a few minutes; press Refresh.</Text>}
       {tidyRun.error && <Text style={styles.danger}>{tidyRun.error.message}</Text>}
       </>
       )}
-      {query.data.proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
-      {query.data.proposals.length > 1 && (
+      {proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
+      {proposals.length > 1 && (
         <View style={styles.row}>
-          <Button label={`Approve all ${query.data.proposals.length}`} styles={styles} onPress={() => decideAll.mutate({ ids: query.data.proposals.map((proposal) => proposal.id), approved: true })} />
-          <Button
-            label={confirmRejectAll ? `Confirm reject ${query.data.proposals.length}` : "Reject all"}
-            tone="danger"
-            styles={styles}
-            onPress={() => (confirmRejectAll ? decideAll.mutate({ ids: query.data.proposals.map((proposal) => proposal.id), approved: false }) : setConfirmRejectAll(true))}
-          />
+          {confirmAll ? (
+            <>
+              <Button
+                label={`Confirm ${confirmAll.approved ? "approve" : "reject"} ${confirmAll.ids.length}`}
+                tone={confirmAll.approved ? undefined : "danger"}
+                disabled={decideAll.isPending}
+                styles={styles}
+                onPress={() => decideAll.mutate(confirmAll)}
+              />
+              <Button label="Cancel" disabled={decideAll.isPending} styles={styles} onPress={() => setConfirmAll(null)} />
+            </>
+          ) : (
+            <>
+              <Button label={`Approve all ${proposals.length}`} styles={styles} onPress={() => setConfirmAll({ approved: true, ids: proposals.map((proposal) => proposal.id) })} />
+              <Button label="Reject all" tone="danger" styles={styles} onPress={() => setConfirmAll({ approved: false, ids: proposals.map((proposal) => proposal.id) })} />
+            </>
+          )}
         </View>
       )}
-      {decideAll.data?.map((message) => (
-        <Text key={message} style={styles.danger}>
+      {decideAll.data?.map((message, index) => (
+        <Text key={`${index}-${message}`} style={styles.danger}>
           {message}
         </Text>
       ))}
-      {query.data.proposals.map((proposal) => (
+      {proposals.map((proposal) => (
         <ProposalCard key={proposal.id} proposal={proposal} where={where} styles={styles} onDone={refresh} />
       ))}
     </View>

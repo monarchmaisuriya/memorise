@@ -225,7 +225,7 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
           : "Proposed memories and changes from capture, tidy, and project scans, across every repo. Nothing reaches agents until you approve it, unless the repo has auto-approve on."}
       </Text>
       <View style={styles.row}>
-        <Button label={tidyAll.isPending ? "Starting tidy" : `Tidy all repos (${repoKeys.length})`} styles={styles} onPress={() => tidyAll.mutate()} />
+        <Button label={tidyAll.isPending ? "Starting tidy" : `Tidy all repos (${repoKeys.length})`} disabled={tidyAll.isPending} styles={styles} onPress={() => tidyAll.mutate()} />
       </View>
       {tidyAll.data?.map((line) => (
         <Text key={line} style={styles.muted}>

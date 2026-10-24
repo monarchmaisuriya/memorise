@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +24,14 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     registerUsageSource: () => undefined,
   } as unknown as PluginServerContext;
   const workspaces: { workspaceDirectory?: string; projectRootPath: string }[] = [];
-  const paseo = { agents: { ref: () => ({ respondToPermission }), list: async () => ({ entries: [] }) }, workspaces: { list: async () => ({ entries: workspaces }) } };
+  const paseo = { agents: { ref: () => ({ respondToPermission }), list: async () => ({ entries: [] }) }, workspaces: {
+      // One workspace per page, so a lookup must follow the cursor.
+      list: async ({ page }: { page?: { cursor?: string } } = {}) => {
+        const at = Number(page?.cursor ?? 0);
+        return { entries: workspaces.slice(at, at + 1), pageInfo: { hasMore: at + 1 < workspaces.length, nextCursor: String(at + 1), prevCursor: null } };
+      },
+    },
+  };
   return {
     server,
     workspaces,
@@ -334,7 +342,8 @@ describe("memorise server entry", () => {
     await fake.call("memory.proposals.reject", { where: repo, id: id("drop") });
     expect((await fake.call("memory.proposals.list", { where: repo })).proposals).toEqual([]);
     expect((await fake.call("memory.list", { where: repo })).facts.map((fact: { subject: string }) => fact.subject)).toEqual(["keep"]);
-    expect(await fake.call("memory.tidy", { where: repo })).toEqual({ started: true });
+    // One memory is not enough to tidy, and the caller is told so instead of a tidy that does nothing.
+    await expect(fake.call("memory.tidy", { where: repo })).rejects.toThrow(/at least 2 memories/);
   });
 
   it("counts pending proposals per repo", async () => {
@@ -344,6 +353,9 @@ describe("memorise server entry", () => {
     const store = new ProposalStore(root);
     await store.add([proposal("github.com/acme/api", "a")], []);
     await store.add([proposal("github.com/acme/web", "b"), proposal("github.com/acme/web", "c")], []);
+    // A proposal file that cannot be read is skipped by the list, so it is not counted either.
+    await mkdir(join(root, "proposals", "github.com", "acme", "docs"), { recursive: true });
+    await writeFile(join(root, "proposals", "github.com", "acme", "docs", "broken.json"), "{");
     expect((await fake.call("memory.proposals.summary", {})).repos).toEqual([
       { repoKey: "github.com/acme/api", pending: 1 },
       { repoKey: "github.com/acme/web", pending: 2 },
@@ -356,10 +368,16 @@ describe("memorise server entry", () => {
     await expect(fake.call("memory.project.scan", { where, mode: "create" })).rejects.toThrow(/Open a workspace of github.com\/acme\/api/);
     const other = await repoWithOrigin("git@github.com:acme/web.git");
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    for (const folder of [other, cwd]) await writeFile(join(folder, "README.md"), "Run make dev.\n");
+    // The repo's workspace is on the second page.
     fake.workspaces.push({ projectRootPath: other }, { workspaceDirectory: cwd, projectRootPath: cwd });
     expect(await fake.call("memory.project.scan", { where, mode: "create" })).toEqual({ started: true, folder: cwd });
     // A scan by folder needs no open workspace; a different repo, so it does not wait on the first.
     expect(await fake.call("memory.project.scan", { where: { directory: other }, mode: "refresh" })).toEqual({ started: true, folder: other });
+    // The fake Paseo cannot start a worker, so each scan fails, and the inbox is told why.
+    for (const scanned of [where, { repoKey: "github.com/acme/web" }]) {
+      await vi.waitFor(async () => expect((await fake.call("memory.proposals.list", { where: scanned })).lastRun).toMatchObject({ kind: "scan", state: "failed" }));
+    }
   });
 
   it("searches a repo's memories by repo key and lists every repo with counts", async () => {

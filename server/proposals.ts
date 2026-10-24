@@ -60,13 +60,17 @@ export class ProposalStore {
     return proposals.sort((a, b) => a.created.localeCompare(b.created));
   }
 
-  // Repos with proposals waiting and how many, in repo key order.
+  // Repos with proposals waiting and how many, in repo key order. Counted with list, so a file that
+  // cannot be read is not counted here either.
   async summary(): Promise<{ repoKey: string; pending: number }[]> {
     const repos: { repoKey: string; pending: number }[] = [];
     const walk = async (dir: string, segments: string[]): Promise<void> => {
       const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-      const pending = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).length;
-      if (pending > 0 && repoKeySchema.safeParse(segments.join("/")).success) repos.push({ repoKey: segments.join("/"), pending });
+      const repoKey = segments.join("/");
+      if (entries.some((entry) => entry.isFile() && entry.name.endsWith(".json")) && repoKeySchema.safeParse(repoKey).success) {
+        const pending = (await this.list(repoKey)).length;
+        if (pending > 0) repos.push({ repoKey, pending });
+      }
       for (const entry of entries) if (entry.isDirectory()) await walk(join(dir, entry.name), [...segments, entry.name]);
     };
     await walk(this.dir, []);

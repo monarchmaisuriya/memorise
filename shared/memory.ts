@@ -316,6 +316,15 @@ export const proposalSchema = z.object({
 });
 export type Proposal = z.infer<typeof proposalSchema>;
 
+// The last tidy or project scan started for a repo, kept in memory until the plugin restarts.
+export const runStatusSchema = z.object({
+  kind: z.enum(["tidy", "scan"]),
+  state: z.enum(["running", "done", "failed"]),
+  message: z.string(),
+  at: z.string(),
+});
+export type RunStatus = z.infer<typeof runStatusSchema>;
+
 export const listProposalsRpc = defineRpc({
   name: "memory.proposals.list",
   input: whereInput,
@@ -323,6 +332,7 @@ export const listProposalsRpc = defineRpc({
     repoKey: repoKeySchema.nullable(),
     proposals: z.array(proposalSchema.extend({ targetFacts: z.array(z.object({ id: factIdSchema, subject: z.string(), body: z.string() })) })),
     captureRunsToday: z.number(),
+    lastRun: runStatusSchema.nullable(),
   }),
 });
 
