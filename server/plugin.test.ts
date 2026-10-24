@@ -394,6 +394,18 @@ describe("memorise server entry", () => {
     }
   });
 
+  it("lists a folder memory meant for matching files once a matching file changed this week", async () => {
+    const fake = start();
+    const plain = tempDir("plugin-plain-");
+    const where = { directory: plain };
+    await fake.call("memory.save", { where, scope: "repo", type: "howto", subject: "drafts", body: "Drafts use the template.", paths: ["drafts/**"], activation: "files" });
+    const listed = async () => (await fake.create({ provider: "claude", cwd: plain })).config.systemPrompt as string;
+    expect(await listed()).not.toContain("Drafts use the template.");
+    await mkdir(join(plain, "drafts"));
+    await writeFile(join(plain, "drafts", "trip.md"), "Day one.\n");
+    expect(await listed()).toContain("Drafts use the template.");
+  });
+
   it("scans a new workspace's project when automatic scans are on, and the inbox says how it went", async () => {
     const fake = start({ ...defaults, projectAutoScan: "once" });
     const cwd = tempDir("plugin-plain-");

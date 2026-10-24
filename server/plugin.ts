@@ -49,7 +49,7 @@ import { MemoryStore } from "./store";
 import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
-import { PathMatcher, workFiles } from "./work-files";
+import { PathMatcher, recentFiles, workFiles } from "./work-files";
 import { openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
 
@@ -139,13 +139,19 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const repoKey = project?.key ?? null;
     const prefs = repoKey ? await repoPrefs.get(repoKey) : null;
     if (prefs && !prefs.enabled) return { off: true as const, repoKey };
-    // A folder outside git has no history, so no files are known to be changed.
-    const changed = repoKey && !isFolderKey(repoKey)
-      ? await workFiles(cwd).catch((error: unknown) => {
-          console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
-          return [];
-        })
-      : [];
+    // In a repo, the files this checkout changed; in a folder outside git, which has no history, the
+    // files changed in the last week. Both are relative to the project root, like a memory's paths.
+    let changed: string[] = [];
+    if (project && isFolderKey(project.key)) {
+      const recent = await recentFiles(project.root);
+      if (recent.cutShort) problems.push("the list of recently changed files was cut short (size or time limit); some memories about them may be listed lower");
+      changed = recent.files;
+    } else if (project) {
+      changed = await workFiles(cwd).catch((error: unknown) => {
+        console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
+        return [];
+      });
+    }
     const paths = new PathMatcher(changed, PATH_MATCH_BUDGET_MS);
     const reachable = (await store.list(repoKey)).filter((fact) => (prefs?.includeGlobal ?? true) || fact.scope === "repo");
     const ranked = rankWithReasons(reachable.filter((fact) => isVisibleToAgents(fact, values.expiryDays)), paths);

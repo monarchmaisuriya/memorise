@@ -1,3 +1,5 @@
+import { readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { matchesGlob } from "node:path/posix";
 import type { FactListItem } from "../shared/memory";
 import { git } from "./git";
@@ -25,6 +27,41 @@ export async function workFiles(cwd: string): Promise<string[]> {
     for (const path of diff.split("\n")) if (path !== "") files.add(path);
   }
   return [...files].slice(0, MAX_FILES);
+}
+
+const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
+// Folders of tools, builds, and dependencies, never the files someone is working on.
+const SKIPPED_FOLDERS = new Set(["node_modules", "dist", "build", "out", "target", "vendor", "__pycache__", "venv", "coverage"]);
+
+// Files a folder outside git is working on: changed in the last 7 days, relative to its root. There
+// is no history to diff, so the modification time stands in for it. Hidden and tool folders are
+// skipped and symlinks are not followed. The walk stops at its entry, file, or time limit and then
+// says the list was cut short.
+export async function recentFiles(
+  root: string,
+  { maxFiles = MAX_FILES, maxEntries = 20_000, budgetMs = 300 }: { maxFiles?: number; maxEntries?: number; budgetMs?: number } = {},
+): Promise<{ files: string[]; cutShort: boolean }> {
+  const since = Date.now() - RECENT_MS;
+  const deadline = Date.now() + budgetMs;
+  const files: string[] = [];
+  const folders = [""];
+  let entries = 0;
+  while (folders.length > 0) {
+    const folder = folders.shift() ?? "";
+    for (const entry of await readdir(join(root, folder), { withFileTypes: true }).catch(() => [])) {
+      entries += 1;
+      if (files.length >= maxFiles || entries > maxEntries || Date.now() > deadline) return { files, cutShort: true };
+      if (entry.name.startsWith(".")) continue;
+      const path = folder ? `${folder}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!SKIPPED_FOLDERS.has(entry.name)) folders.push(path);
+      } else if (entry.isFile()) {
+        const info = await stat(join(root, path)).catch(() => null);
+        if (info && info.mtimeMs >= since) files.push(path);
+      }
+    }
+  }
+  return { files, cutShort: false };
 }
 
 // Answers "is this fact about any of these files?" (by its path globs or the files it cites). Each
