@@ -25,7 +25,7 @@ export default function contribute(client: PluginClientContext) {
       argumentHint: REMEMBER_HINT,
       context: "workspace",
       async onSubmit({ args, workspace, rpc, openPanel }) {
-        await rpc(saveMemoryRpc, { directory: workspace.directory, ...parseRemember(args) });
+        await rpc(saveMemoryRpc, { where: { directory: workspace.directory }, ...parseRemember(args) });
         memoryChanged();
         openPanel("memory");
       },

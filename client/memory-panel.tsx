@@ -50,20 +50,20 @@ function FactCard({ fact, directory, styles, onChanged }: { fact: ListedFact; di
             label="Save"
             styles={styles}
             onPress={() => action.mutate(async () => {
-              await update({ directory, id: fact.id, body: draft });
+              await update({ where: { directory }, id: fact.id, body: draft });
               setEditing(false);
             })}
           />
         )}
         {current && <Button label={editing ? "Cancel" : "Edit"} styles={styles} onPress={() => setEditing((value) => !value)} />}
-        {current && <Button label={fact.pinned ? "Unpin" : "Pin"} styles={styles} onPress={() => action.mutate(() => pin({ directory, id: fact.id, pinned: !fact.pinned }))} />}
-        {current && <Button label="Retire" styles={styles} onPress={() => action.mutate(() => retire({ directory, id: fact.id }))} />}
-        {fact.status === "retired" && !fact.superseded && <Button label="Restore" styles={styles} onPress={() => action.mutate(() => restore({ directory, id: fact.id }))} />}
+        {current && <Button label={fact.pinned ? "Unpin" : "Pin"} styles={styles} onPress={() => action.mutate(() => pin({ where: { directory }, id: fact.id, pinned: !fact.pinned }))} />}
+        {current && <Button label="Retire" styles={styles} onPress={() => action.mutate(() => retire({ where: { directory }, id: fact.id }))} />}
+        {fact.status === "retired" && !fact.superseded && <Button label="Restore" styles={styles} onPress={() => action.mutate(() => restore({ where: { directory }, id: fact.id }))} />}
         <Button
           label={confirmDelete ? "Confirm delete" : "Delete"}
           tone="danger"
           styles={styles}
-          onPress={() => (confirmDelete ? action.mutate(() => remove({ directory, id: fact.id })) : setConfirmDelete(true))}
+          onPress={() => (confirmDelete ? action.mutate(() => remove({ where: { directory }, id: fact.id })) : setConfirmDelete(true))}
         />
       </View>
     </View>
@@ -78,7 +78,7 @@ function AddFact({ directory, hasRepo, styles, onChanged }: { directory: string;
   const mutation = useMutation({
     mutationFn: () => {
       const text = body.trim();
-      return save({ directory, scope, type, subject: text.split("\n")[0].slice(0, 80), body: text });
+      return save({ where: { directory }, scope, type, subject: text.split("\n")[0].slice(0, 80), body: text });
     },
     onSuccess: () => {
       setBody("");
@@ -114,7 +114,7 @@ export function MemoryPanel({ theme, layout, workspaceId }: PluginWorkspacePanel
   const [tab, setTab] = useState<"memories" | "proposed">("memories");
   const [filter, setFilter] = useState<Filter>("all");
   const [showHistory, setShowHistory] = useState(false);
-  const query = useQuery({ queryKey: ["memorise", directory], queryFn: () => list({ directory: directory ?? "" }), enabled: directory !== null });
+  const query = useQuery({ queryKey: ["memorise", directory], queryFn: () => list({ where: { directory: directory ?? "" } }), enabled: directory !== null });
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["memorise", directory] });
   useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise"] })), [queryClient]);
 

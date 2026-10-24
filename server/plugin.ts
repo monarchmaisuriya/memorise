@@ -2,18 +2,27 @@ import type { Server } from "node:http";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   approveProposalRpc,
+  type BulkAction,
+  bulkMemoryRpc,
   deleteMemoryRpc,
   listMemoriesRpc,
   listProposalsRpc,
+  listReposRpc,
+  MAX_BULK_IDS,
+  memoryHistoryRpc,
   memorySettings,
   type MemorySettings,
+  moveMemoryRpc,
   pinMemoryRpc,
   rejectProposalRpc,
   restoreMemoryRpc,
   retireMemoryRpc,
+  revertMemoryRpc,
   saveMemoryRpc,
+  searchMemoriesRpc,
   tidyMemoryRpc,
   updateMemoryRpc,
+  type Where,
 } from "../shared/memory";
 import { Capture } from "./capture";
 import { checkCitations } from "./citations";
@@ -33,6 +42,7 @@ import { isWorkerRequest } from "./workers";
 
 const CITATION_BUDGET_MS = 1_000;
 const PATH_MATCH_BUDGET_MS = 500;
+const BY_USER = { by: "user" as const, provider: null, branch: null, commit: null };
 
 interface Runtime {
   root: string;
@@ -167,56 +177,97 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     await capture.onTurnEnded(agent, paseo);
   });
 
-  server.handle(listMemoriesRpc, async ({ directory }) => {
-    const [{ store, usage }, repoKey, values] = await Promise.all([runtime, readRepoKey(directory), currentSettings()]);
+  // The panel names a workspace folder; the manager names a repo key, or null for global only.
+  const repoKeyOf = (where: Where): Promise<string | null> => ("directory" in where ? readRepoKey(where.directory) : Promise.resolve(where.repoKey));
+
+  server.handle(listMemoriesRpc, async ({ where }) => {
+    const [{ store, usage }, repoKey, values] = await Promise.all([runtime, repoKeyOf(where), currentSettings()]);
     const counts = await usage.counts();
     const facts = orderForAgents(await store.list(repoKey)).map((fact) => ({ ...fact, visibleToAgents: isVisibleToAgents(fact, values.expiryDays), usage: usageOf(counts, fact.id) }));
     return { repoKey, facts };
   });
 
-  server.handle(saveMemoryRpc, async ({ directory, scope, type, subject, body }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
-    if (scope === "repo" && !repoKey) throw new Error("This folder is not in a git repo; save the memory as global instead.");
+  server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (scope === "repo" && !repoKey) throw new Error("directory" in where ? "This folder is not in a git repo; save the memory as global instead." : "No repo was chosen; save the memory as global instead.");
     assertNoSecret(subject, body);
-    const fact = await store.create({
-      scope,
-      repoKey: scope === "repo" ? repoKey : null,
-      type,
-      subject,
-      body,
-      supersedes: null,
-      source: { by: "user", provider: null, branch: null, commit: null },
-      citations: [],
-    });
+    const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, supersedes: null, source: BY_USER, citations: [] });
     return { fact };
   });
 
-  server.handle(updateMemoryRpc, async ({ directory, id, body }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
-    assertNoSecret(body);
-    const fact = await store.supersede(id, repoKey, { body, source: { by: "user", provider: null, branch: null, commit: null } });
-    return { fact };
+  server.handle(updateMemoryRpc, async ({ where, id, subject, body, type, paths }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    assertNoSecret(subject ?? "", body ?? "");
+    const change = { ...(subject !== undefined && { subject }), ...(body !== undefined && { body }), ...(type !== undefined && { type }), ...(paths !== undefined && { paths }) };
+    return { fact: await store.supersede(id, repoKey, { ...change, source: BY_USER }) };
   });
 
-  server.handle(pinMemoryRpc, async ({ directory, id, pinned }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
+  server.handle(pinMemoryRpc, async ({ where, id, pinned }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     return { fact: await store.setPinned(id, repoKey, pinned) };
   });
 
-  server.handle(retireMemoryRpc, async ({ directory, id }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
+  server.handle(retireMemoryRpc, async ({ where, id }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     return { fact: await store.retire(id, repoKey) };
   });
 
-  server.handle(restoreMemoryRpc, async ({ directory, id }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
+  server.handle(restoreMemoryRpc, async ({ where, id }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     return { fact: await store.restore(id, repoKey) };
   });
 
-  server.handle(deleteMemoryRpc, async ({ directory, id }) => {
-    const [{ store }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
+  server.handle(deleteMemoryRpc, async ({ where, id }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     await store.delete(id, repoKey);
     return { deleted: true as const };
+  });
+
+  server.handle(listReposRpc, async () => ({ repos: await (await runtime).store.summaries() }));
+
+  server.handle(searchMemoriesRpc, async ({ where, query }) => {
+    const [{ store, search }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (!search) throw new Error("Keyword search is unavailable: the search index could not be opened (see the plugin log).");
+    const facts = await store.list(repoKey);
+    const current = new Set(facts.filter((fact) => !fact.superseded).map((fact) => fact.id));
+    return { ids: search.search(repoKey ?? "global", facts, current, query, MAX_BULK_IDS) };
+  });
+
+  server.handle(memoryHistoryRpc, async ({ where, id }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    return { versions: await store.history(id, repoKey) };
+  });
+
+  server.handle(revertMemoryRpc, async ({ where, id, versionId }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    return { fact: await store.revert(id, versionId, repoKey, BY_USER) };
+  });
+
+  server.handle(moveMemoryRpc, async ({ where, id, to }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    return { fact: await store.move(id, repoKey, to) };
+  });
+
+  // Each id is applied on its own and reported, so one missing or retired memory does not stop the rest.
+  server.handle(bulkMemoryRpc, async ({ where, ids, action }) => {
+    const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    const apply: Record<BulkAction, (id: string) => Promise<unknown>> = {
+      retire: (id) => store.retire(id, repoKey),
+      restore: (id) => store.restore(id, repoKey),
+      pin: (id) => store.setPinned(id, repoKey, true),
+      unpin: (id) => store.setPinned(id, repoKey, false),
+      delete: (id) => store.delete(id, repoKey),
+    };
+    const results: { id: string; ok: boolean; error?: string }[] = [];
+    for (const id of ids) {
+      try {
+        await apply[action](id);
+        results.push({ id, ok: true });
+      } catch (error) {
+        results.push({ id, ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return { results };
   });
 
   server.handle(listProposalsRpc, async ({ directory }) => {

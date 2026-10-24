@@ -84,10 +84,13 @@ export class MemoryStore {
     return fact;
   }
 
+  private pathFor(fact: Fact): string {
+    return join(this.dirFor(fact.scope, fact.repoKey), `${fact.id}.md`);
+  }
+
   private async save(fact: Fact): Promise<Fact> {
-    const dir = this.dirFor(fact.scope, fact.repoKey);
-    await mkdir(dir, { recursive: true });
-    const path = join(dir, `${fact.id}.md`);
+    await mkdir(this.dirFor(fact.scope, fact.repoKey), { recursive: true });
+    const path = this.pathFor(fact);
     const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
     await writeFile(temp, serializeFact(fact), { encoding: "utf8", mode: 0o600 });
     await rename(temp, path);
@@ -102,7 +105,7 @@ export class MemoryStore {
   }
 
   // An update is one new file naming the old one, so a crash cannot leave two current versions.
-  supersede(id: string, repoKey: string | null, change: Partial<Pick<Fact, "subject" | "body" | "citations" | "paths" | "source">>): Promise<Fact> {
+  supersede(id: string, repoKey: string | null, change: Partial<Pick<Fact, "subject" | "body" | "type" | "citations" | "paths" | "source">>): Promise<Fact> {
     return this.serialize(async () => {
       const old = await this.get(id, repoKey);
       if (old.superseded) throw new Error(`Memory ${id} was already replaced by a newer version; update that one instead`);
@@ -118,6 +121,72 @@ export class MemoryStore {
       const { superseded: _superseded, ...fact } = await this.get(id, repoKey);
       return this.save({ ...fact, status: "retired", modified: new Date().toISOString() });
     });
+  }
+
+  // The version chain a fact belongs to, newest first; any version's id finds the whole chain.
+  async history(id: string, repoKey: string | null): Promise<FactListItem[]> {
+    const facts = await this.list(repoKey);
+    const byId = new Map(facts.map((fact) => [fact.id, fact]));
+    const newer = new Map(facts.flatMap((fact) => (fact.supersedes ? [[fact.supersedes, fact] as const] : [])));
+    let head = byId.get(factIdSchema.parse(id));
+    if (!head) throw new FactNotFoundError(id);
+    // A hand-edited file could link versions in a loop; each id is visited once.
+    const seen = new Set<string>();
+    while (newer.has(head.id) && !seen.has(head.id)) {
+      seen.add(head.id);
+      head = newer.get(head.id) as FactListItem;
+    }
+    const chain: FactListItem[] = [];
+    for (let fact: FactListItem | undefined = head; fact && !chain.includes(fact); fact = fact.supersedes ? byId.get(fact.supersedes) : undefined) chain.push(fact);
+    return chain;
+  }
+
+  // A new version whose content copies an older one; nothing is overwritten.
+  async revert(id: string, versionId: string, repoKey: string | null, source: Fact["source"]): Promise<Fact> {
+    const chain = await this.history(id, repoKey);
+    if (chain[0].id !== id) throw new Error(`Memory ${id} was already replaced by a newer version; revert from that one instead`);
+    const version = chain.find((fact) => fact.id === versionId);
+    if (!version) throw new Error(`Version ${versionId} is not in the history of memory ${id}`);
+    if (version.id === id) throw new Error(`Version ${versionId} is already the current one`);
+    const { subject, body, type, paths, citations } = version;
+    return this.supersede(id, repoKey, { subject, body, type, paths, citations, source });
+  }
+
+  // Moves a fact between a repo and global. A global fact is listed in every repo, so the moved fact
+  // is a new fact rather than a new version: a version link would hide the original only in this
+  // repo. The original is retired; if that fails, the copy is removed so only one stays current.
+  // Citations point at one repo's files, so a fact made global drops them.
+  move(id: string, repoKey: string | null, to: Scope): Promise<Fact> {
+    return this.serialize(async () => {
+      const { superseded, ...fact } = await this.get(id, repoKey);
+      if (superseded) throw new Error(`Memory ${id} was already replaced by a newer version; move that one instead`);
+      if (fact.status === "retired") throw new Error(`Memory ${id} is retired`);
+      if (fact.scope === to) throw new Error(`Memory ${id} is already ${to === "global" ? "global" : "a repo memory"}`);
+      if (to === "repo" && !repoKey) throw new Error("Choose a repo to move this memory into");
+      const now = new Date().toISOString();
+      const copy = await this.save(
+        factSchema.parse({ ...fact, id: newFactId(), scope: to, repoKey: to === "repo" ? repoKey : null, citations: to === "global" ? [] : fact.citations, supersedes: null, created: now, modified: now, lastUsed: now }),
+      );
+      try {
+        await this.save({ ...fact, status: "retired", modified: now });
+      } catch (error) {
+        await rm(this.pathFor(copy), { force: true });
+        throw error;
+      }
+      return copy;
+    });
+  }
+
+  // Current facts (not replaced) for global and each repo, by status, for the manager's repo list.
+  async summaries(): Promise<{ repoKey: string | null; active: number; retired: number; lastModified: string | null }[]> {
+    const summarize = (repoKey: string | null, facts: Fact[]) => {
+      const replaced = new Set(facts.map((fact) => fact.supersedes));
+      const current = facts.filter((fact) => !replaced.has(fact.id));
+      const lastModified = current.map((fact) => fact.modified).sort().at(-1) ?? null;
+      return { repoKey, active: current.filter((fact) => fact.status === "active").length, retired: current.filter((fact) => fact.status === "retired").length, lastModified };
+    };
+    const repos = await this.repoKeys();
+    return [summarize(null, await this.readDir(this.dirFor("global", null))), ...(await Promise.all(repos.map(async (key) => summarize(key, await this.readDir(this.dirFor("repo", key))))))];
   }
 
   // Undoes a retire, from the Memory panel.
