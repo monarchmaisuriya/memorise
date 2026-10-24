@@ -43,7 +43,11 @@ function History({ fact, where, styles }: { fact: ListedFact; where: Where; styl
           <Text style={styles.body}>
             {version.subject}: {version.body}
           </Text>
-          {current && index > 0 && <Button label="Revert to this" styles={styles} onPress={() => action.mutate(version.id)} />}
+          {current && index > 0 && (
+            <View style={styles.row}>
+              <Button label="Revert to this" styles={styles} onPress={() => action.mutate(version.id)} />
+            </View>
+          )}
         </View>
       ))}
       {action.error && <Text style={styles.danger}>{action.error.message}</Text>}
