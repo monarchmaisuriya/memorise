@@ -198,8 +198,39 @@ function useAllFacts(repoKeys: readonly (string | null)[]) {
 }
 
 // Every repo's waiting proposals in one place, and a tidy of every repo with memories.
+// One repo's proposals as a card: the header (repo and count) opens and closes it; open, it shows
+// the repo's inbox.
+function RepoProposalsCard({ repoKey, pending, open, onToggle, styles }: { repoKey: string; pending: number; open: boolean; onToggle(): void; styles: Styles }) {
+  return (
+    <View style={styles.card}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${open ? "Collapse" : "Expand"} ${repoKey}, ${pending} waiting`}
+        onPress={onToggle}
+        style={[styles.row, { justifyContent: "space-between", flexWrap: "nowrap" }]}
+      >
+        <Text style={[styles.body, { flexShrink: 1 }]} numberOfLines={1}>
+          {open ? "▾" : "▸"} {repoKey}
+        </Text>
+        <Text style={styles.muted}>{pending} waiting</Text>
+      </Pressable>
+      {open && <Inbox where={{ repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} />}
+    </View>
+  );
+}
+
 function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: string; pending: number }[]; repoKeys: string[]; styles: Styles }) {
   const tidy = useRpc(tidyMemoryRpc);
+  // Every repo starts collapsed, so the list of repos fits on one screen.
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const allOpen = pending.length > 0 && pending.every((repo) => open.has(repo.repoKey));
+  const toggle = (repoKey: string) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (!next.delete(repoKey)) next.add(repoKey);
+      return next;
+    });
   // Each repo is tidied on its own, so one refusal (daily limit, a tidy already running) does not stop the rest.
   const tidyAll = useMutation({
     mutationFn: async () => {
@@ -226,6 +257,7 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
       </Text>
       <View style={styles.row}>
         <Button label={tidyAll.isPending ? "Starting tidy" : `Tidy all repos (${repoKeys.length})`} disabled={tidyAll.isPending} styles={styles} onPress={() => tidyAll.mutate()} />
+        {pending.length > 1 && <Button label={allOpen ? "Collapse all" : "Expand all"} styles={styles} onPress={() => setOpen(allOpen ? new Set() : new Set(pending.map((repo) => repo.repoKey)))} />}
       </View>
       {tidyAll.data?.map((line) => (
         <Text key={line} style={styles.muted}>
@@ -233,12 +265,7 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
         </Text>
       ))}
       {pending.map((repo) => (
-        <View key={repo.repoKey} style={{ gap: 8 }}>
-          <Text style={styles.label}>
-            {repo.repoKey} · {repo.pending}
-          </Text>
-          <Inbox where={{ repoKey: repo.repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} />
-        </View>
+        <RepoProposalsCard key={repo.repoKey} repoKey={repo.repoKey} pending={repo.pending} open={open.has(repo.repoKey)} onToggle={() => toggle(repo.repoKey)} styles={styles} />
       ))}
     </View>
   );

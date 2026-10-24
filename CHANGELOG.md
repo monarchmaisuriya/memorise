@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-24
+
+### Changed
+
+- The manager's Proposals view shows each repository as a collapsible card, collapsed at first with its name and how many proposals wait; open, it shows that repository's Approve all, Reject all, and proposals. Expand all and Collapse all open or close every card.
+
 ## [0.6.1] - 2026-10-24
 
 ### Fixed
@@ -122,7 +128,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.2
 [0.6.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.1
 [0.6.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.0
 [0.5.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.5.0
