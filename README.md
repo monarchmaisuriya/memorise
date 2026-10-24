@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.1
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -182,7 +182,7 @@ The background agents read text that may contain instructions planted in a sessi
 - **OpenCode:** one rule denies every tool. OpenCode's free models refuse background agents, so capture there needs a paid model.
 - **Codex:** cannot switch off its shell. Its workers run in a read-only sandbox with no network and no web search. A misled Codex worker could still read files and put what it read into a proposal, which you see before approving.
 
-Workers run in an empty folder of their own and are archived when they finish.
+Workers run in the plugin's empty worker folder, inside one hidden Paseo workspace ("Memorise background work") that is made once and kept, and each worker is archived when it finishes. Paseo shows a project in the sidebar once its last workspace is archived, so the hidden workspace is never archived; if you archive it, the next worker makes it again.
 
 ## What agents can and cannot do
 
