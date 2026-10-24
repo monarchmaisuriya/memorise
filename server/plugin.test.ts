@@ -125,10 +125,18 @@ describe("memorise server entry", () => {
     expect(fake.respondToPermission).not.toHaveBeenCalled();
   });
 
-  it("refuses a repo memory outside a git repo and a secret-shaped one", async () => {
+  it("keeps a folder outside git as its own project, for agents and the app, and refuses a secret-shaped memory", async () => {
     const fake = start();
     const plain = tempDir("plain-");
-    await expect(fake.call("memory.save", { where: { directory: plain }, scope: "repo", type: "howto", subject: "x", body: "y" })).rejects.toThrow(/not in a git repo/);
+    const { fact } = await fake.call("memory.save", { where: { directory: plain }, scope: "repo", type: "howto", subject: "notes", body: "Drafts live in drafts/." });
+    expect(fact.repoKey).toMatch(/^folder\/plain-/);
+    const errors = vi.spyOn(console, "error");
+    const { config } = await fake.create({ provider: "claude", cwd: plain });
+    // No git history to diff, so changed files are not asked for (and no error is logged).
+    expect(errors.mock.calls.flat().join("\n")).not.toMatch(/changed files/);
+    errors.mockRestore();
+    expect(config.systemPrompt).toContain("notes: Drafts live in drafts/.");
+    expect(Object.keys(config.mcpServers)).toEqual(["paseo-memorise", "paseo-memorise-write"]);
     await expect(fake.call("memory.save", { where: { directory: plain }, scope: "global", type: "howto", subject: "x", body: "token: ghp_abcdefghijklmnopqrstuvwxyz0123456789" })).rejects.toThrow(/GitHub token/);
   });
 
@@ -407,6 +415,8 @@ describe("memorise server entry", () => {
     const { repos } = await fake.call("memory.repos", {});
     expect(repos).toEqual([
       { repoKey: null, active: 0, retired: 0, lastModified: null },
+      // A workspace folder outside git is a project of its own.
+      { repoKey: expect.stringMatching(/^folder\/plugin-plain-/), active: 0, retired: 0, lastModified: null },
       { repoKey: "github.com/acme/api", active: 1, retired: 0, lastModified: expect.any(String) },
       { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null },
       { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null },

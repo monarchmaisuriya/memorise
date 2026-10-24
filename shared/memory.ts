@@ -37,6 +37,11 @@ export const repoKeySchema = z
   .regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9._~-]+)+$/, "Expected a repo key such as github.com/owner/repo")
   .refine((key) => !key.split("/").includes(".."), "A repo key cannot contain '..'");
 
+// A folder outside git is keyed "folder/<name>-<hash>" (see server/repo-key.ts).
+export function isFolderKey(repoKey: string): boolean {
+  return repoKey.startsWith("folder/");
+}
+
 export const citationSchema = z.object({
   path: z
     .string()

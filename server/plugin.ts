@@ -9,6 +9,7 @@ import {
   exportMemoryRpc,
   importMemoryRpc,
   listMemoriesRpc,
+  isFolderKey,
   listProposalsRpc,
   listReposRpc,
   MAX_BULK_IDS,
@@ -133,7 +134,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     });
     const prefs = repoKey ? await repoPrefs.get(repoKey) : null;
     if (prefs && !prefs.enabled) return { off: true as const, repoKey };
-    const changed = repoKey
+    // A folder outside git has no history, so no files are known to be changed.
+    const changed = repoKey && !isFolderKey(repoKey)
       ? await workFiles(cwd).catch((error: unknown) => {
           console.error(`[memorise] changed files for ${cwd} unavailable: ${String(error)}`);
           return [];
@@ -224,7 +226,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned, activation, enabled, until }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (scope === "repo" && !repoKey) throw new Error("directory" in where ? "This folder is not in a git repo; save the memory as global instead." : "No repo was chosen; save the memory as global instead.");
+    if (scope === "repo" && !repoKey) throw new Error("No repo was chosen; save the memory as global instead.");
     assertNoSecret(subject, body);
     const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, activation, enabled, until, supersedes: null, source: BY_USER, citations: [] });
     return { fact };
@@ -421,9 +423,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // workspace that belongs to the repo.
   async function checkoutFor(where: Where, paseo: PaseoApi): Promise<{ repoKey: string; folder: string }> {
     if ("directory" in where) {
-      const repoKey = await readRepoKey(where.directory);
-      if (!repoKey) throw new Error("This folder is not in a git repo, so there is no project to read.");
-      return { repoKey, folder: where.directory };
+      return { repoKey: await readRepoKey(where.directory), folder: where.directory };
     }
     if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
     const folder = (await openRepoCheckouts(paseo)).get(where.repoKey);

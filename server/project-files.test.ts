@@ -86,8 +86,11 @@ describe("project reader", () => {
     expect((await readProjectFiles(docsLink)).map((file) => file.path)).not.toContain("docs/notes.md");
   });
 
-  it("refuses a folder that is not in a git repo", async () => {
-    await expect(readProjectFiles(tempDir("plain-"))).rejects.toThrow(/not in a git repo/);
+  it("reads a folder outside git from the folder itself", async () => {
+    const plain = tempDir("plain-");
+    await writeFile(join(plain, "README.md"), "Notes for the trip.\n");
+    await mkdir(join(plain, "sub"));
+    expect((await readProjectFiles(plain)).map((file) => file.path)).toEqual(["README.md"]);
   });
 });
 

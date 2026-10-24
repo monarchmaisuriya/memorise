@@ -9,6 +9,7 @@ import { Capture } from "./capture";
 import { buildCapturePrompt, parseCandidates, parseTidyActions } from "./extractor";
 import type { AgentTimelineItem, PaseoApi } from "./paseo-types";
 import { ProposalStore, proposalHash } from "./proposals";
+import { readRepoKey } from "./repo-key";
 import { RepoPrefs } from "./repo-prefs";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -296,7 +297,17 @@ describe("capture", () => {
     expect(fake.created[0].outputSchema).toBeUndefined();
   });
 
-  it("skips short sessions, its own workers, repos without git, and runs over the daily cap", async () => {
+  it("captures a session in a folder outside git into that folder's own memory", async () => {
+    const plain = tempDir("plain-");
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow({ ...agent, cwd: plain })).toBe(1);
+    const folder = await readRepoKey(plain);
+    expect(folder).toMatch(/^folder\//);
+    expect((await proposals.list(folder)).map((proposal) => proposal.subject)).toEqual(["integration tests"]);
+  });
+
+  it("skips short sessions, its own workers, and runs over the daily cap", async () => {
     const fake = fakePaseo(conversation(2), reply);
     capture.remember(fake.paseo);
     expect(await capture.captureNow(agent)).toBe(0);
@@ -309,10 +320,8 @@ describe("capture", () => {
     expect(fake.created).toHaveLength(0);
     vi.useRealTimers();
 
-    const plain = tempDir("plain-");
     const long = fakePaseo(conversation(5), reply);
     capture.remember(long.paseo);
-    expect(await capture.captureNow({ ...agent, cwd: plain })).toBe(0);
 
     values = { ...values, captureMaxPerDay: 1 };
     expect(await capture.captureNow(agent)).toBe(1);
