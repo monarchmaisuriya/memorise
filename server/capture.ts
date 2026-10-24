@@ -443,7 +443,7 @@ export class Capture {
   }
 
   private async runTidy(paseo: PaseoApi, repoKey: string, cwd: string | null, facts: FactListItem[], values: MemorySettings): Promise<number> {
-    const notes = cwd ? await checkCitations(cwd, facts, 2_000) : new Map<string, string>();
+    const notes = cwd ? await checkCitations({ cwd, root: (await this.deps.keys.resolve(cwd)).root }, facts, 2_000) : new Map<string, string>();
     const counts = await this.deps.usage.counts();
     const listed = facts.slice(0, 200).map((fact) => {
       const usage = usageOf(counts, fact.id);

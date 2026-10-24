@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { bodySchema, type Citation, citationSchema, type Fact, type FactListItem, factIdSchema, MAX_CITATIONS, MAX_PATH_GLOBS, memoryTypeSchema, pathGlobSchema, subjectSchema } from "../shared/memory";
+import { bodySchema, type Citation, citationSchema, type Fact, type FactListItem, factIdSchema, isFolderKey, MAX_CITATIONS, MAX_PATH_GLOBS, memoryTypeSchema, pathGlobSchema, subjectSchema } from "../shared/memory";
+import { hashProjectFile } from "./file-hash";
 import { git } from "./git";
 import type { AgentScope, TokenAuthority } from "./mcp-auth";
+import type { ProjectKeys } from "./project-keys";
 import { assertNoSecret } from "./secrets";
 import type { SearchIndex } from "./search-index";
 import { FactNotFoundError, type MemoryStore } from "./store";
@@ -31,6 +33,8 @@ export interface MemoryMcpOptions {
   search: SearchIndex | null;
   searchProblem?: string;
   usage: UsageLog;
+  // Finds a folder project's root for citations pinned to file content.
+  keys: ProjectKeys;
   expiryDays(): Promise<number>;
   // False when the agent's repo is set apart from global memories.
   includeGlobal(repoKey: string): Promise<boolean>;
@@ -46,7 +50,7 @@ export function mcpServerEntries(port: number, token: string) {
 
 function describeFact(fact: Fact | FactListItem): string {
   const where = fact.scope === "global" ? "global" : fact.repoKey;
-  const cites = fact.citations.map((c) => `${c.path}${c.lines ? `:${c.lines}` : ""}@${c.commit}`).join(", ");
+  const cites = fact.citations.map((c) => `${c.path}${c.lines ? `:${c.lines}` : ""}@${c.commit ?? `#${c.hash}`}`).join(", ");
   return [
     `[${fact.id}] ${fact.type} (${where}): ${fact.subject}`,
     fact.body,
@@ -61,6 +65,10 @@ function text(value: string) {
   return { content: [{ type: "text" as const, text: value }] };
 }
 
+function normalizedPath(path: string): string {
+  return path.trim().replace(/^(\.\/)+/, "").replace(/\/{2,}/g, "/");
+}
+
 async function headOf(cwd: string): Promise<{ branch: string | null; commit: string | null }> {
   const read = (args: string[]) => git(cwd, args, GIT_TIMEOUT_MS).catch(() => null);
   const [branch, commit] = await Promise.all([read(["rev-parse", "--abbrev-ref", "HEAD"]), read(["rev-parse", "--short=12", "HEAD"])]);
@@ -71,7 +79,7 @@ const citationInput = z
   .array(z.object({ path: z.string().describe("Path relative to the repo root"), lines: z.string().optional().describe("Line or range, like 12 or 12-18") }))
   .max(MAX_CITATIONS)
   .optional()
-  .describe("Code the fact is about. The current commit is recorded, so later sessions can see when that code changed.");
+  .describe("Code the fact is about. The current commit (or, in a folder outside git, the file's content) is recorded, so later sessions can see when that code changed.");
 
 export class MemoryMcp {
   private readonly writeTimes = new Map<string, number[]>();
@@ -127,20 +135,39 @@ export class MemoryMcp {
     return fact;
   }
 
-  // Citations are pinned to the commit the agent is looking at, and each cited file must exist there,
-  // so a later change to that file can be detected. Paths are relative to the repo root.
-  private async pinCitations(cwd: string, citations: { path: string; lines?: string }[], commit: string | null): Promise<Citation[]> {
+  // Citations are pinned so a later change to the cited file can be detected: in a repo to the commit
+  // the agent is looking at (the file must exist there), in a folder outside git to the file's
+  // content hash. Paths are relative to the project root.
+  private async pinCitations(scope: AgentScope, citations: { path: string; lines?: string }[], commit: string | null): Promise<Citation[]> {
     if (citations.length === 0) return [];
-    if (!commit) throw new Error("Citations are pinned to a git commit, and this project has none (it is not in git, or has no commit yet). Save the fact without citations.");
+    if (scope.repoKey && isFolderKey(scope.repoKey)) return this.pinToContent(scope.cwd, citations);
+    const { cwd } = scope;
+    if (!commit) throw new Error("This repo has no commit yet, so citations cannot be pinned. Save the fact without citations.");
     const pinned: Citation[] = [];
     for (const citation of citations) {
-      const path = citation.path.trim().replace(/^(\.\/)+/, "").replace(/\/{2,}/g, "/");
+      const path = normalizedPath(citation.path);
       const parsed = citationSchema.safeParse({ ...citation, path, commit });
       if (!parsed.success) throw new Error(`Citation ${citation.path}: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
       await git(cwd, ["cat-file", "-e", `${commit}:${path}`], GIT_TIMEOUT_MS).catch(() => {
         throw new Error(`Citation ${path} does not exist at commit ${commit}. Cite files by their path from the repo root.`);
       });
       pinned.push(parsed.data);
+    }
+    return pinned;
+  }
+
+  private async pinToContent(cwd: string, citations: { path: string; lines?: string }[]): Promise<Citation[]> {
+    const { root } = await this.options.keys.resolve(cwd);
+    const pinned: Citation[] = [];
+    for (const citation of citations) {
+      const path = normalizedPath(citation.path);
+      // The path is checked before any file is read.
+      const checked = citationSchema.safeParse({ ...citation, path, hash: "0".repeat(16) });
+      if (!checked.success) throw new Error(`Citation ${citation.path}: ${checked.error.issues.map((issue) => issue.message).join("; ")}`);
+      const hash = await hashProjectFile(root, path).catch((error: unknown) => {
+        throw new Error(`Citation ${error instanceof Error ? error.message : String(error)}. Cite files by their path from the folder's root.`);
+      });
+      pinned.push({ ...checked.data, hash });
     }
     return pinned;
   }
@@ -227,7 +254,7 @@ export class MemoryMcp {
           paths: args.paths ?? [],
           supersedes: null,
           source: { by: "agent", provider: scope.provider, ...head },
-          citations: await this.pinCitations(scope.cwd, args.citations ?? [], head.commit),
+          citations: await this.pinCitations(scope, args.citations ?? [], head.commit),
         });
         return { result: `Saved memory ${created.id}.`, id: created.id };
       }),
@@ -253,7 +280,7 @@ export class MemoryMcp {
           ...(args.fact ? { body: args.fact } : {}),
           // Citations are re-pinned only when the agent cites again; changing the wording alone does not
           // mean the cited code was re-checked, so the old commits (and any "needs check") stay.
-          ...(args.citations ? { citations: await this.pinCitations(scope.cwd, args.citations, head.commit) } : {}),
+          ...(args.citations ? { citations: await this.pinCitations(scope, args.citations, head.commit) } : {}),
           source: { by: "agent", provider: scope.provider, ...head },
         });
         return { result: `Saved memory ${next.id}, replacing ${args.id}.`, id: next.id };

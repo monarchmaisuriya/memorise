@@ -109,6 +109,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       search,
       searchProblem,
       usage,
+      keys,
       expiryDays: async () => (await currentSettings()).expiryDays,
       includeGlobal: async (repoKey) => (await repoPrefs.get(repoKey)).includeGlobal,
     });
@@ -157,7 +158,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const ranked = rankWithReasons(reachable.filter((fact) => isVisibleToAgents(fact, values.expiryDays)), paths);
     if (paths.skipped) problems.push("ranking by changed files was cut short (time budget); some memories about those files may be listed lower");
     const visible = ranked.map(({ fact }) => fact);
-    const notes = repoKey ? await checkCitations(cwd, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
+    const notes = project ? await checkCitations({ cwd, root: project.root }, visible.filter((fact) => fact.scope === "repo"), CITATION_BUDGET_MS) : new Map<string, string>();
     const section = buildMemorySection({ repoKey, facts: visible, notes, maxLines: values.indexMaxLines, toolsAvailable: mcpProblem === null, problems });
     return { off: false as const, repoKey, section, ranked };
   }
