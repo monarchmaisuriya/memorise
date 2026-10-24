@@ -32,7 +32,7 @@ import {
 } from "../shared/memory";
 import { Capture } from "./capture";
 import { checkCitations } from "./citations";
-import { buildMemorySection, withMemorySection, withoutMemorySection } from "./index-prompt";
+import { buildMemorySection, INDEX_MAX_BYTES, withMemorySection, withoutMemorySection } from "./index-prompt";
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
@@ -260,19 +260,21 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   });
 
   server.handle(previewMemoryRpc, async ({ directory }) => {
-    const prepared = await prepareMemory(directory, await currentSettings());
-    if (prepared.off) return { repoKey: prepared.repoKey, off: true, text: "", bytes: 0, listed: [] };
+    const values = await currentSettings();
+    const prepared = await prepareMemory(directory, values);
+    const limits = { maxLines: values.indexMaxLines, maxBytes: INDEX_MAX_BYTES };
+    if (prepared.off) return { repoKey: prepared.repoKey, off: true, text: "", bytes: 0, ...limits, listed: [] };
     const shown = new Set(prepared.section.shownIds);
     const listed = prepared.ranked
       .filter(({ fact }) => shown.has(fact.id))
       .map(({ fact, reason }) => ({ id: fact.id, subject: fact.subject, reason, titleOnly: fact.activation === "title" && !fact.pinned }));
-    return { repoKey: prepared.repoKey, off: false, text: prepared.section.text, bytes: Buffer.byteLength(prepared.section.text), listed };
+    return { repoKey: prepared.repoKey, off: false, text: prepared.section.text, bytes: Buffer.byteLength(prepared.section.text), ...limits, listed };
   });
 
   server.handle(exportMemoryRpc, async ({ where, format }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     const scope = repoKey ? "repo" : "global";
-    const facts = (await store.list(repoKey)).filter((fact) => fact.scope === scope && fact.status === "active" && !fact.superseded).sort((a, b) => a.created.localeCompare(b.created));
+    const facts = (await store.list(repoKey)).filter((fact) => fact.scope === scope && fact.status === "active" && !fact.superseded).sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
     return { text: formatExport(facts, format, repoKey), count: facts.length };
   });
 
@@ -351,8 +353,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { results };
   });
 
-  server.handle(listProposalsRpc, async ({ directory }) => {
-    const [{ store, proposals, capture }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
+  server.handle(listProposalsRpc, async ({ where }) => {
+    const [{ store, proposals, capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
     if (!repoKey) return { repoKey, proposals: [], captureRunsToday: await capture.runsToday() };
     const facts = new Map((await store.list(repoKey)).map((fact) => [fact.id, fact]));
     const pending = (await proposals.list(repoKey)).map((proposal) => ({
@@ -365,24 +367,26 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { repoKey, proposals: pending, captureRunsToday: await capture.runsToday() };
   });
 
-  server.handle(approveProposalRpc, async ({ directory, id, subject, body, paths }) => {
-    const [{ store, proposals }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
-    if (!repoKey) throw new Error("This folder is not in a git repo, so it has no proposals.");
+  server.handle(approveProposalRpc, async ({ where, id, subject, body, paths }) => {
+    const [{ store, proposals }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (!repoKey) throw new Error("Proposals belong to a repo; choose one.");
     await proposals.approve(id, repoKey, store, { subject, body, paths });
     return { approved: true as const };
   });
 
-  server.handle(rejectProposalRpc, async ({ directory, id }) => {
-    const [{ proposals }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
-    if (!repoKey) throw new Error("This folder is not in a git repo, so it has no proposals.");
+  server.handle(rejectProposalRpc, async ({ where, id }) => {
+    const [{ proposals }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (!repoKey) throw new Error("Proposals belong to a repo; choose one.");
     await proposals.reject(id, repoKey);
     return { rejected: true as const };
   });
 
   // Starts a tidy pass and returns at once; its proposals appear in the inbox when it finishes.
-  server.handle(tidyMemoryRpc, async ({ directory }, { paseo }) => {
-    const [{ capture }, repoKey] = await Promise.all([runtime, readRepoKey(directory)]);
-    if (!repoKey) throw new Error("This folder is not in a git repo, so it has no repo memory to tidy.");
+  // With a workspace folder, tidy also checks citations against that checkout.
+  server.handle(tidyMemoryRpc, async ({ where }, { paseo }) => {
+    const [{ capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
+    if (!repoKey) throw new Error("Tidy works on one repo's memory; choose a repo.");
+    const directory = "directory" in where ? where.directory : null;
     if (capture.isTidying(repoKey)) throw new Error("A tidy of this repo's memory is already running; its proposals will appear here.");
     capture.remember(paseo);
     void capture.tidyNow(repoKey, directory).catch((error: unknown) => console.error(`[memorise] tidy of ${repoKey} failed: ${String(error)}`));
