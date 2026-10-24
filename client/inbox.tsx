@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import type { z } from "zod";
-import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, tidyMemoryRpc, type Where } from "../shared/memory";
+import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, scanProjectRpc, tidyMemoryRpc, type Where } from "../shared/memory";
 import { onMemoryChanged } from "./memory-events";
 import { Button, type Styles } from "./panel-ui";
 
@@ -26,7 +26,7 @@ function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedPro
   const editedPaths = paths.split(",").map((glob) => glob.trim()).filter((glob) => glob !== "");
   const action = useMutation({ mutationFn: (run: () => Promise<unknown>) => run(), onSuccess: onDone });
   const editable = proposal.kind !== "retire";
-  const from = proposal.source.from === "capture" ? `captured by ${proposal.source.provider}` : `tidy by ${proposal.source.provider}`;
+  const from = `${proposal.source.from === "capture" ? "captured" : proposal.source.from === "project" ? "project scan" : "tidy"} by ${proposal.source.provider}`;
   return (
     <View style={styles.card}>
       <Text style={styles.body}>{KIND_LABEL[proposal.kind]}</Text>
@@ -70,8 +70,9 @@ function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedPro
   );
 }
 
-// Proposed changes wait here; nothing reaches an agent until it is approved.
-export function Inbox({ where, styles, onChanged }: { where: Where; styles: Styles; onChanged(): void }) {
+// Proposed changes wait here; nothing reaches an agent until it is approved. `controls` false leaves
+// out capture status, project scans, and tidy, for lists of several repos' proposals.
+export function Inbox({ where, styles, onChanged, controls = true }: { where: Where; styles: Styles; onChanged(): void; controls?: boolean }) {
   const list = useRpc(listProposalsRpc);
   const tidy = useRpc(tidyMemoryRpc);
   const settings = useSettings(memorySettings);
@@ -83,25 +84,74 @@ export function Inbox({ where, styles, onChanged }: { where: Where; styles: Styl
   };
   useEffect(() => onMemoryChanged(() => void queryClient.invalidateQueries({ queryKey: ["memorise-proposals"] })), [queryClient]);
   const tidyRun = useMutation({ mutationFn: () => tidy({ where }) });
+  const scan = useRpc(scanProjectRpc);
+  const approve = useRpc(approveProposalRpc);
+  const reject = useRpc(rejectProposalRpc);
+  const scanRun = useMutation({ mutationFn: (mode: "create" | "refresh") => scan({ where, mode }) });
+  const [confirmRejectAll, setConfirmRejectAll] = useState(false);
+  // Each proposal is applied on its own, so one that fails does not stop the rest; failures are listed.
+  const decideAll = useMutation({
+    mutationFn: async ({ ids, approved }: { ids: string[]; approved: boolean }) => {
+      const failed: string[] = [];
+      for (const id of ids) {
+        try {
+          if (approved) await approve({ where, id });
+          else await reject({ where, id });
+        } catch (error) {
+          failed.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+      return failed;
+    },
+    onSettled: () => {
+      setConfirmRejectAll(false);
+      refresh();
+    },
+  });
 
   if (query.isPending) return <Text style={styles.muted}>Loading proposals</Text>;
   if (query.error) return <Text style={styles.danger}>{query.error.message}</Text>;
   const captureOn = settings.status === "ready" && settings.values.captureEnabled;
   return (
     <View style={{ gap: 12 }}>
+      {controls && (
+      <>
       <Text style={styles.muted}>
         {captureOn
           ? `Capture is on: finished sessions propose memories here. Runs today: ${query.data.captureRunsToday}.`
           : "Capture is off. Turn it on in Settings (in the manager, or Settings > Plugins > Memorise) to have finished sessions propose memories."}
       </Text>
       <View style={styles.row}>
+        <Button label="Create from project" styles={styles} onPress={() => scanRun.mutate("create")} />
+        <Button label="Re-check against project" styles={styles} onPress={() => scanRun.mutate("refresh")} />
         <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} styles={styles} onPress={() => tidyRun.mutate()} />
         <Button label="Refresh" styles={styles} onPress={refresh} />
       </View>
+      <Text style={styles.muted}>A project scan reads the README, docs, and build files (not the instruction files' content), with the tidy provider, and proposes memories; re-check also proposes fixing saved ones the files contradict.</Text>
+      {scanRun.isSuccess && <Text style={styles.muted}>Scan started on {scanRun.data.folder}. Its proposals appear here in a few minutes; press Refresh.</Text>}
+      {scanRun.error && <Text style={styles.danger}>{scanRun.error.message}</Text>}
       {"repoKey" in where && <Text style={styles.muted}>From the manager, tidy cannot check citations against a checkout; run it from a workspace's panel to include that check.</Text>}
       {tidyRun.isSuccess && <Text style={styles.muted}>Tidy started. Its proposals appear here in a few minutes; press Refresh.</Text>}
       {tidyRun.error && <Text style={styles.danger}>{tidyRun.error.message}</Text>}
+      </>
+      )}
       {query.data.proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
+      {query.data.proposals.length > 1 && (
+        <View style={styles.row}>
+          <Button label={`Approve all ${query.data.proposals.length}`} styles={styles} onPress={() => decideAll.mutate({ ids: query.data.proposals.map((proposal) => proposal.id), approved: true })} />
+          <Button
+            label={confirmRejectAll ? `Confirm reject ${query.data.proposals.length}` : "Reject all"}
+            tone="danger"
+            styles={styles}
+            onPress={() => (confirmRejectAll ? decideAll.mutate({ ids: query.data.proposals.map((proposal) => proposal.id), approved: false }) : setConfirmRejectAll(true))}
+          />
+        </View>
+      )}
+      {decideAll.data?.map((message) => (
+        <Text key={message} style={styles.danger}>
+          {message}
+        </Text>
+      ))}
       {query.data.proposals.map((proposal) => (
         <ProposalCard key={proposal.id} proposal={proposal} where={where} styles={styles} onDone={refresh} />
       ))}

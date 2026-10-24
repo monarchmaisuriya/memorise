@@ -46,6 +46,7 @@ function badges(fact: ListedFact): string[] {
   return [
     fact.type,
     fact.scope === "global" ? "global" : null,
+    fact.source.by === "auto" ? "auto" : null,
     state,
     fact.pinned ? "pinned" : null,
     !fact.enabled ? "off" : null,
@@ -70,7 +71,14 @@ export function FactCard({ fact, where, hasRepo, styles, selected, onSelect, sho
   const [confirmDelete, setConfirmDelete] = useState(false);
   const action = useMutation({ mutationFn: (run: () => Promise<unknown>) => run(), onSuccess: () => memoryChanged() });
   const current = fact.status === "active" && !fact.superseded;
-  const by = fact.source.by === "user" ? "you" : fact.source.by === "captured" ? `captured (${fact.source.provider ?? "agent"}), approved by you` : (fact.source.provider ?? "agent");
+  const by =
+    fact.source.by === "user"
+      ? "you"
+      : fact.source.by === "captured"
+        ? `proposed by ${fact.source.provider ?? "agent"}, approved by you`
+        : fact.source.by === "auto"
+          ? `proposed by ${fact.source.provider ?? "agent"}, auto-approved`
+          : (fact.source.provider ?? "agent");
   const { shown, read, found } = fact.usage;
   const repoLabel = showRepo && fact.repoKey ? `${fact.repoKey} · ` : "";
   if (editing) return <FactEditor where={where} fact={fact} defaultScope={fact.scope} hasRepo={hasRepo} styles={styles} onDone={() => setEditing(false)} />;
