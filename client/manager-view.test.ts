@@ -37,11 +37,11 @@ function fact(overrides: Partial<ListedFact> = {}): ListedFact {
 describe("manager filters", () => {
   it("names only the filters that differ from the defaults", () => {
     expect(activeFilters(DEFAULT_FILTERS, false)).toEqual([]);
-    expect(activeFilters({ ...DEFAULT_FILTERS, type: "gotcha", control: "off" }, false).map((filter) => filter.label)).toEqual(["gotcha", "off for agents"]);
+    expect(activeFilters({ ...DEFAULT_FILTERS, type: "gotcha", control: "off" }, false).map((filter) => filter.label)).toEqual(["Gotcha", "Off"]);
   });
 
   it("leaves out the sort chip while a search orders the list", () => {
-    expect(activeFilters({ ...DEFAULT_FILTERS, sort: "most used" }, false).map((filter) => filter.label)).toEqual(["sorted by most used"]);
+    expect(activeFilters({ ...DEFAULT_FILTERS, sort: "most used" }, false).map((filter) => filter.label)).toEqual(["Most used"]);
     expect(activeFilters({ ...DEFAULT_FILTERS, sort: "most used" }, true)).toEqual([]);
   });
 

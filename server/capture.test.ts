@@ -139,7 +139,7 @@ describe("capture", () => {
     const fake = fakePaseo([], JSON.stringify({ facts: [{ type: "howto", subject: "dev server", body: "Run make dev to start the API.", paths: ["Makefile"] }] }));
     capture.remember(fake.paseo);
     expect(await (await capture.startScan(REPO, cwd, "create")).done).toEqual({ pending: 1, autoSaved: 0 });
-    expect(capture.lastRun(REPO)).toMatchObject({ kind: "scan", state: "done", message: "1 proposed" });
+    expect(capture.lastRun(REPO)).toMatchObject({ kind: "scan", state: "done", message: "1 suggested" });
     const [proposal] = await proposals.list(REPO);
     expect(proposal).toMatchObject({ kind: "new", subject: "dev server", source: { from: "project", provider: "claude" } });
     expect(fake.created[0].prompt).toContain("<<<File README.md");

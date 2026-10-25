@@ -112,7 +112,7 @@ export class ProposalStore {
   reject(id: string, repoKey: string): Promise<void> {
     return this.serialize(async () => {
       const proposal = (await this.list(repoKey)).find((candidate) => candidate.id === id);
-      if (!proposal) throw new Error(`No proposal with id ${id} for this repo`);
+      if (!proposal) throw new Error(`No suggestion with id ${id} in this project`);
       const rejected = await this.rejected();
       rejected.add(proposal.hash);
       await mkdir(this.dir, { recursive: true, mode: 0o700 });
@@ -130,7 +130,7 @@ export class ProposalStore {
   approve(id: string, repoKey: string, store: MemoryStore, edits: { subject?: string; body?: string; paths?: string[] }, by: "captured" | "auto" = "captured"): Promise<void> {
     return this.serialize(async () => {
       const proposal = (await this.list(repoKey)).find((candidate) => candidate.id === id);
-      if (!proposal) throw new Error(`No proposal with id ${id} for this repo`);
+      if (!proposal) throw new Error(`No suggestion with id ${id} in this project`);
       const subject = edits.subject ?? proposal.subject;
       const body = edits.body ?? proposal.body;
       const paths = edits.paths ?? proposal.paths;

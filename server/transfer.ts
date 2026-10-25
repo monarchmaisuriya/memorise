@@ -102,7 +102,7 @@ function candidates(text: string): { line: string; entry: ImportEntry | null; re
     try {
       data = JSON.parse(trimmed);
     } catch (error) {
-      throw new Error(`The text looks like JSON but does not parse (${String(error)}); paste a Memorise JSON export or one memory per line`);
+      throw new Error(`The text looks like JSON but isn't valid JSON (${error instanceof Error ? error.message : String(error)}). Paste a Memorise JSON export, or one memory per line.`);
     }
     const items: unknown[] = Array.isArray(data) ? data : z.object({ facts: z.array(z.unknown()) }).parse(data).facts;
     return items.map((item) => {

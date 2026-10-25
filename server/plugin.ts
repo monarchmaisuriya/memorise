@@ -267,7 +267,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(saveMemoryRpc, async ({ where, scope, type, subject, body, paths, pinned, activation, enabled, until }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (scope === "repo" && !repoKey) throw new Error("No repo was chosen; save the memory as global instead.");
+    if (scope === "repo" && !repoKey) throw new Error("No project was chosen; save the memory as global instead.");
     assertNoSecret(subject, body);
     const fact = await store.create({ scope, repoKey: scope === "repo" ? repoKey : null, type, subject, body, paths, pinned, activation, enabled, until, supersedes: null, source: BY_USER, citations: [] });
     return { fact };
@@ -328,7 +328,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // repeats within the same import, are skipped and named.
   server.handle(importMemoryRpc, async ({ where, scope, text, dryRun }) => {
     const [{ store }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (scope === "repo" && !repoKey) throw new Error("No repo was chosen; import the memories as global instead.");
+    if (scope === "repo" && !repoKey) throw new Error("No project was chosen; import the memories as global instead.");
     const { entries, skipped } = parseImport(text);
     const saved = new Set((await store.list(repoKey)).filter((fact) => fact.scope === scope && !fact.superseded).map((fact) => importKey(fact.subject, fact.body)));
     const seen = new Set<string>();
@@ -426,14 +426,14 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   server.handle(approveProposalRpc, async ({ where, id, subject, body, paths }) => {
     const [{ store, proposals }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (!repoKey) throw new Error("Proposals belong to a repo; choose one.");
+    if (!repoKey) throw new Error("Suggestions belong to a project; choose one.");
     await proposals.approve(id, repoKey, store, { subject, body, paths });
     return { approved: true as const };
   });
 
   server.handle(rejectProposalRpc, async ({ where, id }) => {
     const [{ proposals }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (!repoKey) throw new Error("Proposals belong to a repo; choose one.");
+    if (!repoKey) throw new Error("Suggestions belong to a project; choose one.");
     await proposals.reject(id, repoKey);
     return { rejected: true as const };
   });
@@ -446,11 +446,11 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     if ("directory" in where) {
       return { repoKey: await (await runtime).keys.keyOf(where.directory), folder: where.directory };
     }
-    if (!where.repoKey) throw new Error("A project scan reads one repo; choose a repo.");
+    if (!where.repoKey) throw new Error("Suggesting from project files works on one project; choose one.");
     const { root, keys } = await runtime;
     const folder = (await openRepoCheckouts(paseo, root, keys)).get(where.repoKey);
     if (folder) return { repoKey: where.repoKey, folder };
-    throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; a project scan reads that checkout's files.`);
+    throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; suggesting from project files reads that checkout's files.`);
   }
 
   // Starts a project scan and returns at once; its proposals appear in the inbox when it finishes.
@@ -458,7 +458,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const { capture } = await runtime;
     capture.remember(paseo);
     const { repoKey, folder } = await checkoutFor(where, paseo);
-    if (capture.isScanning(repoKey)) throw new Error("A project scan of this repo is already running; its proposals will appear here.");
+    if (capture.isScanning(repoKey)) throw new Error("Suggestions from this project's files are already being made; they will appear here.");
     const { done } = await capture.startScan(repoKey, folder, mode);
     void done.catch((error: unknown) => console.error(`[memorise] project scan of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
     return { started: true as const, folder };
@@ -468,9 +468,9 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // workspace folder, tidy also checks citations against that checkout.
   server.handle(tidyMemoryRpc, async ({ where }, { paseo }) => {
     const [{ capture }, repoKey] = await Promise.all([runtime, repoKeyOf(where)]);
-    if (!repoKey) throw new Error("Tidy works on one repo's memory; choose a repo.");
+    if (!repoKey) throw new Error("Clean up works on one project's memories; choose a project.");
     const directory = "directory" in where ? where.directory : null;
-    if (capture.isTidying(repoKey)) throw new Error("A tidy of this repo's memory is already running; its proposals will appear here.");
+    if (capture.isTidying(repoKey)) throw new Error("A clean-up of this project is already running; its suggestions will appear here.");
     capture.remember(paseo);
     const { done } = await capture.startTidy(repoKey, directory);
     void done.catch((error: unknown) => console.error(`[memorise] tidy of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
