@@ -92,7 +92,7 @@ export class MemoryStore {
 
   private async save(fact: Fact): Promise<Fact> {
     // Every write passes here, so a fact can never be left listed for files without any paths.
-    if (fact.activation === "files" && fact.paths.length === 0) throw new Error(`Memory "${fact.subject}" is set to show only for matching files but has no paths; add a path glob or choose another activation`);
+    if (fact.activation === "files" && fact.paths.length === 0) throw new Error(`Memory "${fact.subject}" is set to show only when matching files change, but it is about no files; add a file pattern or choose another option`);
     await mkdir(this.dirFor(fact.scope, fact.repoKey), { recursive: true });
     const path = this.pathFor(fact);
     const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
@@ -165,8 +165,8 @@ export class MemoryStore {
       const { superseded, ...fact } = await this.get(id, repoKey);
       if (superseded) throw new Error(`Memory ${id} was already replaced by a newer version; move that one instead`);
       if (fact.status === "retired") throw new Error(`Memory ${id} is retired`);
-      if (fact.scope === to) throw new Error(`Memory ${id} is already ${to === "global" ? "global" : "a repo memory"}`);
-      if (to === "repo" && !repoKey) throw new Error("Choose a repo to move this memory into");
+      if (fact.scope === to) throw new Error(`Memory ${id} is already ${to === "global" ? "global" : "a project memory"}`);
+      if (to === "repo" && !repoKey) throw new Error("Choose a project to move this memory into");
       const now = new Date().toISOString();
       const copy = await this.save(
         factSchema.parse({ ...fact, id: newFactId(), scope: to, repoKey: to === "repo" ? repoKey : null, citations: to === "global" ? [] : fact.citations, supersedes: null, created: now, modified: now, lastUsed: now }),

@@ -127,7 +127,7 @@ describe("MemoryStore", () => {
     expect((await store.get(original.id, REPO)).status).toBe("retired");
     expect((await store.list("github.com/acme/web")).map((fact) => fact.id)).toEqual([moved.id]);
     await expect(store.move(moved.id, REPO, "global")).rejects.toThrow(/already global/);
-    await expect(store.move(moved.id, null, "repo")).rejects.toThrow(/Choose a repo/);
+    await expect(store.move(moved.id, null, "repo")).rejects.toThrow(/Choose a project/);
   });
 
   it("leaves only the original when retiring it fails during a move", async () => {
@@ -145,7 +145,7 @@ describe("MemoryStore", () => {
   });
 
   it("refuses a files-only fact without paths", async () => {
-    await expect(store.create(repoFact("Only for API files.", { activation: "files" }))).rejects.toThrow(/has no paths/);
+    await expect(store.create(repoFact("Only for API files.", { activation: "files" }))).rejects.toThrow(/about no files/);
   });
 
   it("changes controls in place, without a new version", async () => {

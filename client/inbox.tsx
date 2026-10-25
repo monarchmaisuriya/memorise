@@ -5,16 +5,25 @@ import { Text, TextInput, View } from "react-native";
 import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, scanProjectRpc, tidyMemoryRpc, type Where } from "../shared/memory";
 import { onMemoryChanged } from "./memory-events";
-import { Button, type Styles } from "./panel-ui";
+import { Badge, Button, type Styles } from "./panel-ui";
+import { count, errorText, KIND, projectName, providerName, relativeDate } from "./copy";
 
 type ListedProposal = z.infer<typeof listProposalsRpc.output>["proposals"][number];
 
 const KIND_LABEL: Record<ListedProposal["kind"], string> = {
   new: "New memory",
-  replace: "Replace",
+  replace: "Rewrite",
   merge: "Merge",
-  retire: "Retire",
+  retire: "Archive",
 };
+
+const TARGET_VERB: Record<ListedProposal["kind"], string> = { new: "", replace: "Rewrites", merge: "Merges", retire: "Archives" };
+
+// Where a suggestion came from, so it can be judged: its source, who wrote it, and when.
+function sourceText(proposal: ListedProposal): string {
+  const from = proposal.source.from === "capture" ? "Suggested from a session" : proposal.source.from === "project" ? "Suggested from project files" : "Suggested by a clean-up";
+  return `${from} · ${providerName(proposal.source.provider)} · ${relativeDate(proposal.created)}`;
+}
 
 function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedProposal; where: Where; styles: Styles; onDone(): void }) {
   const approve = useRpc(approveProposalRpc);
@@ -26,28 +35,31 @@ function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedPro
   const editedPaths = paths.split(",").map((glob) => glob.trim()).filter((glob) => glob !== "");
   const action = useMutation({ mutationFn: (run: () => Promise<unknown>) => run(), onSuccess: onDone });
   const editable = proposal.kind !== "retire";
-  const from = `${proposal.source.from === "capture" ? "captured" : proposal.source.from === "project" ? "project scan" : "tidy"} by ${proposal.source.provider}`;
   return (
     <View style={styles.card}>
-      <Text style={styles.body}>{KIND_LABEL[proposal.kind]}</Text>
-      <Text style={styles.muted}>
-        {proposal.type} · {from} · {proposal.created.slice(0, 10)}
-        {proposal.reason ? ` · ${proposal.reason}` : ""}
-      </Text>
+      <View style={styles.row}>
+        <Text style={styles.body}>{KIND_LABEL[proposal.kind]}</Text>
+        <Badge label={KIND[proposal.type]} styles={styles} />
+      </View>
+      <Text style={styles.muted}>{sourceText(proposal)}</Text>
+      {proposal.reason ? <Text style={styles.muted}>Why: {proposal.reason}</Text> : null}
       {proposal.targetFacts.map((target) => (
         <Text key={target.id} style={styles.muted}>
-          {proposal.kind === "retire" ? "retires" : "replaces"}: {target.subject}: {target.body}
+          {TARGET_VERB[proposal.kind]} “{target.subject}”: {target.body}
         </Text>
       ))}
       {editable ? (
         <>
-          <TextInput accessibilityLabel="Proposed subject" value={subject} onChangeText={setSubject} style={[styles.input, { minHeight: 0 }]} />
-          <TextInput accessibilityLabel="Proposed memory text" multiline value={body} onChangeText={setBody} style={styles.input} />
-          <Text style={styles.muted}>About files (globs, comma-separated; empty for none). Memories about files a workspace changes are listed first.</Text>
-          <TextInput accessibilityLabel="Proposed file paths" value={paths} onChangeText={setPaths} placeholder="src/api/**" style={[styles.input, { minHeight: 0 }]} />
+          <Text style={styles.muted}>Title</Text>
+          <TextInput accessibilityLabel="Title" value={subject} onChangeText={setSubject} style={[styles.input, { minHeight: 0 }]} />
+          <Text style={styles.muted}>Memory</Text>
+          <TextInput accessibilityLabel="Memory" multiline value={body} onChangeText={setBody} style={styles.input} />
+          <Text style={styles.muted}>About files</Text>
+          <TextInput accessibilityLabel="About files" value={paths} onChangeText={setPaths} placeholderTextColor={styles.muted.color} placeholder="src/api/**" style={[styles.input, { minHeight: 0 }]} />
+          <Text style={styles.muted}>File patterns, separated by commas. Memories about files a workspace changes are listed first.</Text>
         </>
       ) : null}
-      {action.error && <Text style={styles.danger}>{action.error instanceof Error ? action.error.message : String(action.error)}</Text>}
+      {action.error && <Text style={styles.danger}>{errorText(action.error)}</Text>}
       <View style={styles.row}>
         <Button
           label="Approve"
@@ -94,8 +106,8 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
   const approve = useRpc(approveProposalRpc);
   const reject = useRpc(rejectProposalRpc);
   const scanRun = useMutation({ mutationFn: (mode: "create" | "refresh") => scan({ where, mode }) });
-  // "Approve all" and "Reject all" each ask once, and then decide exactly the proposals that were shown
-  // when asked; the question is dropped when the list changes.
+  // "Reject all" asks once, and then rejects exactly the suggestions shown when asked; the question
+  // is dropped when the list changes.
   const [confirmAll, setConfirmAll] = useState<{ approved: boolean; ids: string[] } | null>(null);
   const shownIds = query.data?.proposals.map((proposal) => proposal.id).join(",") ?? "";
   useEffect(() => setConfirmAll(null), [shownIds]);
@@ -115,7 +127,7 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
           if (approved) await approve({ where, id });
           else await reject({ where, id });
         } catch (error) {
-          failed.push(error instanceof Error ? error.message : String(error));
+          failed.push(errorText(error));
         }
       }
       return failed;
@@ -126,9 +138,10 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
     },
   });
 
-  if (query.isPending) return <Text style={styles.muted}>Loading proposals</Text>;
-  if (query.error) return <Text style={styles.danger}>{query.error.message}</Text>;
+  if (query.isPending) return <Text style={styles.muted}>Loading suggestions</Text>;
+  if (query.error) return <Text style={styles.danger}>{errorText(query.error)}</Text>;
   const captureOn = settings.status === "ready" && settings.values.captureEnabled;
+  const runLimit = settings.status === "ready" ? settings.values.captureMaxPerDay : null;
   const lastRun = query.data.lastRun;
   const running = lastRun?.state === "running";
   const proposals = query.data.proposals;
@@ -138,46 +151,46 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
       <>
       <Text style={styles.muted}>
         {captureOn
-          ? `Capture is on: finished sessions propose memories here. Runs today: ${query.data.captureRunsToday}.`
-          : "Capture is off. Turn it on in Settings (in the manager, or Settings > Plugins > Memorise) to have finished sessions propose memories."}
+          ? `Suggestions from sessions are on. Background runs today: ${query.data.captureRunsToday}${runLimit ? ` of ${runLimit}` : ""}.`
+          : "Suggestions from sessions are off. Turn them on in Settings to have finished sessions suggest memories."}
       </Text>
       <View style={styles.row}>
-        <Button label="Create from project" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("create")} />
-        <Button label="Re-check against project" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("refresh")} />
-        <Button label={tidyRun.isPending ? "Starting tidy" : "Tidy this repo's memory"} disabled={running || tidyRun.isPending} styles={styles} onPress={() => tidyRun.mutate()} />
+        <Button label="Suggest from project files" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("create")} />
+        <Button label="Check memories against project files" disabled={running || scanRun.isPending} styles={styles} onPress={() => scanRun.mutate("refresh")} />
+        <Button label={tidyRun.isPending ? "Starting clean-up" : "Suggest clean-ups"} disabled={running || tidyRun.isPending} styles={styles} onPress={() => tidyRun.mutate()} />
         <Button label="Refresh" styles={styles} onPress={refresh} />
       </View>
-      <Text style={styles.muted}>A project scan sends the README, docs, and build files to the tidy provider and proposes memories; re-check also proposes fixing saved ones the files contradict. AGENTS.md and CLAUDE.md are sent too, only so it leaves out what agents already read.</Text>
-      {scanRun.isSuccess && <Text style={styles.muted}>Scan started on {scanRun.data.folder}.</Text>}
-      {scanRun.error && <Text style={styles.danger}>{scanRun.error.message}</Text>}
+      <Text style={styles.muted}>
+        Suggesting from project files reads the README, docs, and build files and suggests memories. Checking also suggests fixes to saved memories those files contradict. Clean-ups suggest merging duplicates, rewording unclear memories, and archiving outdated ones.
+      </Text>
+      {scanRun.isSuccess && <Text style={styles.muted}>Started on {scanRun.data.folder}.</Text>}
+      {scanRun.error && <Text style={styles.danger}>{errorText(scanRun.error)}</Text>}
       {lastRun && (
         <Text style={lastRun.state === "failed" ? styles.danger : styles.muted}>
-          {lastRun.kind === "scan" ? "Project scan" : "Tidy"}{" "}
-          {lastRun.state === "running" ? "running; its proposals appear here when it finishes." : lastRun.state === "failed" ? `failed: ${lastRun.message}` : `finished: ${lastRun.message}.`}
+          {lastRun.kind === "scan" ? "Suggesting from project files" : "Clean-up"}
+          {lastRun.state === "running" ? ": running. Its suggestions appear here when it finishes." : lastRun.state === "failed" ? ` failed: ${lastRun.message}` : `: done, ${lastRun.message}.`}
         </Text>
       )}
-      {"repoKey" in where && <Text style={styles.muted}>From the manager, tidy cannot check citations against a checkout; run it from a workspace's panel to include that check.</Text>}
-      {tidyRun.error && <Text style={styles.danger}>{tidyRun.error.message}</Text>}
+      {"repoKey" in where && <Text style={styles.muted}>From here, a clean-up can't check cited files. Run it from a workspace's Memorise panel to include that check.</Text>}
+      {tidyRun.error && <Text style={styles.danger}>{errorText(tidyRun.error)}</Text>}
       </>
       )}
-      {proposals.length === 0 && <Text style={styles.muted}>No proposals waiting.</Text>}
+      {proposals.length === 0 && <Text style={styles.muted}>Nothing to review.</Text>}
       {proposals.length > 1 && (
         <View style={styles.row}>
           {confirmAll ? (
             <>
-              <Button
-                label={`Confirm ${confirmAll.approved ? "approve" : "reject"} ${confirmAll.ids.length}`}
-                tone={confirmAll.approved ? undefined : "danger"}
-                disabled={decideAll.isPending}
-                styles={styles}
-                onPress={() => decideAll.mutate(confirmAll)}
-              />
+              <Text style={[styles.body, { flexShrink: 1 }]}>
+                Reject {count(confirmAll.ids.length, "suggestion", "suggestions")}{"repoKey" in where && where.repoKey ? ` in ${projectName(where.repoKey)}` : ""}? They won't be suggested again.
+              </Text>
+              <Button label={`Reject ${confirmAll.ids.length}`} tone="danger" disabled={decideAll.isPending} styles={styles} onPress={() => decideAll.mutate(confirmAll)} />
               <Button label="Cancel" disabled={decideAll.isPending} styles={styles} onPress={() => setConfirmAll(null)} />
             </>
           ) : (
             <>
-              <Button label={`Approve all ${proposals.length}`} styles={styles} onPress={() => setConfirmAll({ approved: true, ids: proposals.map((proposal) => proposal.id) })} />
-              <Button label="Reject all" tone="danger" styles={styles} onPress={() => setConfirmAll({ approved: false, ids: proposals.map((proposal) => proposal.id) })} />
+              {/* Approving needs no question: an approved memory can be archived afterwards. */}
+              <Button label={decideAll.isPending ? "Approving" : `Approve all ${proposals.length}`} disabled={decideAll.isPending} styles={styles} onPress={() => decideAll.mutate({ approved: true, ids: proposals.map((proposal) => proposal.id) })} />
+              <Button label="Reject all" tone="danger" disabled={decideAll.isPending} styles={styles} onPress={() => setConfirmAll({ approved: false, ids: proposals.map((proposal) => proposal.id) })} />
             </>
           )}
         </View>

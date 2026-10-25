@@ -251,7 +251,7 @@ export class Capture {
   // Takes one run from today's allowance for a run the user or the weekly tidy started; throws when
   // the daily limit is reached, so the caller is told instead of nothing happening.
   private async requireRun(label: string, limit: number): Promise<void> {
-    if (!(await this.takeRun(label, limit))) throw new Error(`Today's ${limit} background runs are used up (capture, tidy, and project scans share them); raise the limit in Settings or try tomorrow.`);
+    if (!(await this.takeRun(label, limit))) throw new Error(`Today's ${limit} background runs are used up (session suggestions, clean-ups, and project files share them). Raise the limit in Settings, Advanced, or try tomorrow.`);
   }
 
   // Starts one project scan of a repo: reads its project files from `cwd`, and proposes new memories
@@ -259,7 +259,7 @@ export class Capture {
   // Uses the tidy provider and model, and counts against the daily limit. Checks that can fail at
   // once (no Paseo, no files, the daily limit) throw here; `done` settles when the worker finishes.
   async startScan(repoKey: string, cwd: string, mode: ScanMode): Promise<{ done: Promise<{ pending: number; autoSaved: number }> }> {
-    if (this.scanning.has(repoKey)) throw new Error("A project scan of this repo is already running");
+    if (this.scanning.has(repoKey)) throw new Error("Suggestions from this project's files are already being made");
     if (isWorkerCwd(this.deps.root, cwd)) throw new Error("The plugin's own worker folders are never scanned");
     this.scanning.add(repoKey);
     try {
@@ -269,7 +269,7 @@ export class Capture {
       const project = await this.deps.keys.resolve(cwd);
       if (project.key !== repoKey) throw new Error(`${cwd} belongs to ${project.key}, not ${repoKey}`);
       const files = await readProjectFiles(project.root);
-      if (files.length === 0) throw new Error("No project files were found to read (README, docs, manifests)");
+      if (files.length === 0) throw new Error("No project files were found to read (README, docs, or build files)");
       await this.requireRun(`project scan of ${repoKey}`, values.captureMaxPerDay);
       const startedAt = new Date().toISOString();
       await this.serializeState((state) => {
@@ -291,7 +291,7 @@ export class Capture {
           throw error;
         },
       );
-      const run = this.track(repoKey, "scan", recorded, ({ pending, autoSaved }) => `${pending} proposed${autoSaved ? `, ${autoSaved} saved automatically` : ""}`);
+      const run = this.track(repoKey, "scan", recorded, ({ pending, autoSaved }) => `${pending} suggested${autoSaved ? `, ${autoSaved} saved without review` : ""}`);
       return { done: run.finally(() => this.scanning.delete(repoKey)) };
     } catch (error) {
       this.scanning.delete(repoKey);
@@ -314,7 +314,7 @@ export class Capture {
     try {
       parsed = parseProjectReply(extractJson(reply), mode, new Set(byId.keys()));
     } catch (error) {
-      throw new Error(`the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing proposed`);
+      throw new Error(`the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing was suggested`);
     }
     const source = { from: "project" as const, agentId: null, provider, model: values.tidyModel || null };
     const proposals: NewProposal[] = [
@@ -425,20 +425,20 @@ export class Capture {
   // added. One pass per repo at a time; the attempt is recorded before it runs and counts against the
   // daily limit. Checks that can fail at once throw here.
   async startTidy(repoKey: string, cwd: string | null): Promise<{ done: Promise<number> }> {
-    if (this.tidying.has(repoKey)) throw new Error("A tidy of this repo's memory is already running");
+    if (this.tidying.has(repoKey)) throw new Error("A clean-up of this project is already running");
     // Marked before the first await, so a second call can never slip in between.
     this.tidying.add(repoKey);
     try {
       const values = await this.deps.settings();
       const facts = (await this.deps.store.list(repoKey)).filter((fact) => fact.scope === "repo" && isVisibleToAgents(fact, 0));
-      if (facts.length < 2) throw new Error("Tidy needs at least 2 memories agents can see in this repo");
+      if (facts.length < 2) throw new Error("Clean up needs at least 2 memories agents can see in this project");
       const paseo = this.paseo;
       if (!paseo) throw new Error("The plugin has not seen Paseo yet; open an agent and try again");
       await this.serializeState((state) => {
         state.tidiedAt[repoKey] = new Date().toISOString();
       });
       await this.requireRun(`tidy of ${repoKey}`, values.captureMaxPerDay);
-      const run = this.track(repoKey, "tidy", this.runTidy(paseo, repoKey, cwd, facts, values), (count) => `${count} proposed`);
+      const run = this.track(repoKey, "tidy", this.runTidy(paseo, repoKey, cwd, facts, values), (count) => `${count} suggested`);
       return { done: run.finally(() => this.tidying.delete(repoKey)) };
     } catch (error) {
       this.tidying.delete(repoKey);
@@ -467,7 +467,7 @@ export class Capture {
     try {
       actions = parseTidyActions(extractJson(reply), new Set(byId.keys()));
     } catch (error) {
-      throw new Error(`the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing proposed`);
+      throw new Error(`the worker's reply was not valid (${error instanceof Error ? error.message : String(error)}); nothing was suggested`);
     }
     const source = { from: "tidy" as const, agentId: null, provider, model: values.tidyModel || null };
     const proposals = actions.map((action): NewProposal => {

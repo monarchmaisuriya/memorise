@@ -1,4 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { projectName } from "./client/copy";
 import { ManagerScreen } from "./client/manager-screen";
 import { memoryChanged } from "./client/memory-events";
 import { MemoryPanel } from "./client/memory-panel";
@@ -11,7 +12,7 @@ import { listMemoriesRpc, PROPOSALS_CARD_KIND, proposalsCardSchema, saveMemoryRp
 export default function contribute(client: PluginClientContext) {
   const openManager = (repoKey: string | null) => client.openScreen({ screenId: "manager", params: repoKey ? { repo: repoKey } : {} });
   const removers = [
-    client.addScreen({ id: "manager", title: (params) => (params.repo ? `Memorise: ${params.repo}` : "Memorise"), Component: ManagerScreen }),
+    client.addScreen({ id: "manager", title: (params) => (params.repo ? `Memorise: ${projectName(params.repo)}` : "Memorise"), Component: ManagerScreen }),
     client.addSidebarHeaderItem({ id: "memorise", title: "Memorise", Component: MemoriseSidebarItem }),
     client.addWorkspacePanel({ id: "memory", title: "Memorise", icon: "Brain", context: "workspace", Component: (props) => <MemoryPanel {...props} openManager={openManager} /> }),
     client.addCommandCenterItem({
@@ -26,7 +27,7 @@ export default function contribute(client: PluginClientContext) {
     }),
     client.addCommandCenterItem({
       id: "open-manager-repo",
-      title: "Open Memorise manager for this repo",
+      title: "Open Memorise for this project",
       icon: "Brain",
       keywords: ["memory", "memories", "manager"],
       context: "workspace",
@@ -37,7 +38,7 @@ export default function contribute(client: PluginClientContext) {
     }),
     client.addCommandCenterItem({
       id: "open-manager",
-      title: "Open Memorise manager",
+      title: "Open Memorise for all projects",
       icon: "Brain",
       keywords: ["memory", "memories", "manager"],
       context: "global",
@@ -47,7 +48,7 @@ export default function contribute(client: PluginClientContext) {
     }),
     client.addSlashCommand({
       name: "remember",
-      description: "Save a memory for agents in this repo (or --global for all repos)",
+      description: "Save a memory for agents in this project (add --global for every project)",
       argumentHint: REMEMBER_HINT,
       context: "workspace",
       async onSubmit({ args, workspace, rpc, openPanel }) {

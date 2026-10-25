@@ -62,7 +62,7 @@ export async function resolveModel(paseo: PaseoApi, provider: Provider, model: s
   if (model) return `${provider}/${model}`;
   const { models } = await paseo.providers.listModels(provider);
   const chosen = models?.find((candidate) => candidate.isDefault) ?? models?.[0];
-  if (!chosen) throw new Error(`Paseo lists no models for ${provider}; set a model in Settings > Plugins > Memorise`);
+  if (!chosen) throw new Error(`Paseo lists no models for ${provider}; set a model in Memorise Settings, Advanced`);
   return `${provider}/${chosen.id}`;
 }
 

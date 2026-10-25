@@ -8,32 +8,32 @@ type NumberKey = "indexMaxLines" | "expiryDays" | "mcpPort" | "captureIdleMinute
 type TextKey = "captureModel" | "captureInstructions" | "captureExclusions" | "tidyModel";
 type DraftKey = NumberKey | TextKey;
 
-const MEMORY_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: string }> = [
-  { key: "indexMaxLines", label: "Memories listed in each new agent's prompt", hint: "0 lists none; agents still get the memory tools. Up to 400." },
-  { key: "expiryDays", label: "Hide agent-written memories unused for (days)", hint: "0 never hides them. Memories you saved never expire." },
-  { key: "mcpPort", label: "Local port for the memory tools", hint: "Takes effect after reloading the plugin. Agents created before a change keep the old port." },
+// Main level: what most people change. Advanced: limits, timing, models, and the tools port.
+const ADVANCED_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: string }> = [
+  { key: "indexMaxLines", label: "Memories in each new agent's prompt", hint: "Default 150, up to 400. 0 lists none; agents can still search." },
+  { key: "expiryDays", label: "Hide unused agent memories after (days)", hint: "Default 60. 0 never hides them. Memories you saved are never hidden." },
+  { key: "captureIdleMinutes", label: "Wait after a session goes quiet (minutes)", hint: "Default 20, from 5 to 240. A new message restarts the wait." },
+  { key: "captureMinUserMessages", label: "Messages needed before suggesting", hint: "Default 3, from 1 to 50. Counts your new messages since that session's last suggestions." },
+  { key: "captureMaxPerDay", label: "Background runs per day", hint: "Default 10, from 1 to 100. Shared by session suggestions, clean-ups, and project files; each run is one model call." },
+  { key: "mcpPort", label: "Memory tools port", hint: "Default 6790. Applies after the plugin reloads; agents started before keep the old port." },
 ];
-const CAPTURE_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: string }> = [
-  { key: "captureIdleMinutes", label: "Capture after the agent is idle for (minutes)", hint: "5 to 240. Each new turn restarts the wait." },
-  { key: "captureMinUserMessages", label: "Capture once you have sent at least this many new messages", hint: "Counted since the last capture of that session. 1 to 50." },
-  { key: "captureMaxPerDay", label: "Background runs per day, at most (capture, tidy, and project scans)", hint: "1 to 100. Each run is one model call." },
+const ADVANCED_TEXTS: ReadonlyArray<{ key: TextKey; label: string; hint: string }> = [
+  { key: "captureModel", label: "Session model", hint: "Used only when one provider reads every session. Empty uses the provider's default model." },
+  { key: "captureInstructions", label: "What to suggest", hint: "Optional guidance for session suggestions, up to 2,000 characters." },
+  { key: "captureExclusions", label: "What never to suggest", hint: "Optional, up to 2,000 characters." },
+  { key: "tidyModel", label: "Clean-up and project files model", hint: "Empty uses the provider's default model." },
 ];
-const CAPTURE_TEXTS: ReadonlyArray<{ key: TextKey; label: string; hint: string }> = [
-  { key: "captureModel", label: "Capture model", hint: "Used only when one provider reads every session. Empty, or with \"Same as the session\", each provider's default model is used." },
-  { key: "captureInstructions", label: "What to capture", hint: "Optional guidance, up to 2,000 characters." },
-  { key: "captureExclusions", label: "What never to capture", hint: "Optional, up to 2,000 characters." },
-];
-const TIDY_TEXTS: ReadonlyArray<{ key: TextKey; label: string; hint: string }> = [{ key: "tidyModel", label: "Tidy model", hint: "Empty uses the provider's default model." }];
 
+const PROVIDER_LABEL: Record<(typeof PROVIDERS)[number], string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode" };
 const CAPTURE_PROVIDER_OPTIONS = [
-  { label: "Same as the session (no transcript leaves its provider)", value: "session" },
-  ...PROVIDERS.map((provider) => ({ label: provider, value: provider })),
+  { label: "Same as the session (transcripts stay with their provider)", value: "session" },
+  ...PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider })),
 ] as const;
-const TIDY_PROVIDER_OPTIONS = PROVIDERS.map((provider) => ({ label: provider, value: provider }));
+const TIDY_PROVIDER_OPTIONS = PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider }));
 const PROJECT_AUTO_SCAN_OPTIONS = [
   { label: "Off", value: "off" as const },
   { label: "Once per project", value: "once" as const },
-  { label: "Once, then re-check weekly", value: "weekly" as const },
+  { label: "Once, then check weekly", value: "weekly" as const },
 ];
 
 export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
@@ -46,17 +46,17 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
   const save = (values: MemorySettings) => void settings.save(values, settings.revision);
   const saveDrafts = () => {
     const next = { ...settings.values };
-    for (const { key, label } of [...MEMORY_NUMBERS, ...CAPTURE_NUMBERS]) {
+    for (const { key, label } of ADVANCED_NUMBERS) {
       const draft = drafts[key]?.trim();
       if (draft === undefined) continue;
       // An emptied field must not quietly become 0, which has a meaning of its own.
       if (!/^\d+$/.test(draft)) {
-        setInputError(`${label}: expected a whole number, got "${draft}"`);
+        setInputError(`Enter a whole number for “${label}” (got “${draft}”).`);
         return;
       }
       next[key] = Number(draft);
     }
-    for (const { key } of [...CAPTURE_TEXTS, ...TIDY_TEXTS]) {
+    for (const { key } of ADVANCED_TEXTS) {
       const draft = drafts[key];
       if (draft !== undefined) next[key] = draft;
     }
@@ -74,87 +74,85 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
     />
   );
   const saveAction = (
-    <SettingsAction label="" actionLabel="Save" disabled={settings.saving || Object.keys(drafts).length === 0} error={inputError ?? settings.saveError} onPress={saveDrafts} />
+    <SettingsAction label="" actionLabel="Save advanced settings" disabled={settings.saving || Object.keys(drafts).length === 0} error={inputError ?? settings.saveError} onPress={saveDrafts} />
   );
   return (
     <>
-      <SettingsSection title="Memorise">
+      <SettingsSection title="Memory">
         <SettingsCard>
           <SettingsSwitch
-            label="Give new agents memory"
-            hint="Adds the memory index and tools to new Claude, Codex, and OpenCode agents. Off leaves saved memories untouched."
+            label="Give agents memory"
+            hint="New Claude, Codex, and OpenCode agents get your memories and the memory tools. Off keeps saved memories."
             value={settings.values.enabled}
             disabled={settings.saving}
             onValueChange={(enabled) => save({ ...settings.values, enabled })}
           />
           <SettingsSwitch
-            label="Approve memory reads automatically"
-            hint="Search and read run without asking. Saving, changing, or retiring a memory still asks you."
+            label="Read memories without asking"
+            hint="Agents search and open memories without asking you. Saving or changing one still asks."
             value={settings.values.autoApproveReads}
             disabled={settings.saving}
             onValueChange={(autoApproveReads) => save({ ...settings.values, autoApproveReads })}
           />
         </SettingsCard>
-        <SettingsCard>
-          {MEMORY_NUMBERS.map(input)}
-          {saveAction}
-        </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="Capture from finished sessions">
+      <SettingsSection title="Suggestions from sessions">
         <SettingsCard>
           <SettingsSwitch
-            label="Propose memories from finished sessions"
-            hint="After a session goes idle, a restricted background agent reads it and proposes memories. They wait in the Memory panel until you approve them. Each run is a model call."
+            label="Suggest memories from sessions"
+            hint="When a session goes quiet, a restricted background agent reads it and suggests memories for you to review. Each run is one model call."
             value={settings.values.captureEnabled}
             disabled={settings.saving}
             onValueChange={(captureEnabled) => save({ ...settings.values, captureEnabled })}
           />
           <SettingsSelect
-            label="Provider that reads the session"
-            hint="The transcript (with secret-shaped text removed) is sent to this provider."
+            label="Provider that reads sessions"
+            hint="Secret-shaped text is removed before the session is sent."
             value={settings.values.captureProvider}
             options={CAPTURE_PROVIDER_OPTIONS}
             disabled={settings.saving}
             onValueChange={(captureProvider) => save({ ...settings.values, captureProvider })}
           />
         </SettingsCard>
-        <SettingsCard>
-          {CAPTURE_NUMBERS.map(input)}
-          {CAPTURE_TEXTS.map(input)}
-          {saveAction}
-        </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="Tidy">
+      <SettingsSection title="Clean up">
         <SettingsCard>
-          <SettingsSelect
-            label="Provider that tidies"
-            hint="Reads this repo's saved memories (which agents already see) and proposes merges, rewrites, and retirements."
-            value={settings.values.tidyProvider}
-            options={TIDY_PROVIDER_OPTIONS}
-            disabled={settings.saving}
-            onValueChange={(tidyProvider) => save({ ...settings.values, tidyProvider })}
-          />
           <SettingsSwitch
-            label="Tidy each repo weekly"
-            hint="Otherwise tidy runs only when you press Tidy in the Memory panel."
+            label="Clean up each project weekly"
+            hint="Suggests merging duplicates, rewording unclear memories, and archiving outdated ones. Otherwise only when you press Suggest clean-ups."
             value={settings.values.tidyWeekly}
             disabled={settings.saving}
             onValueChange={(tidyWeekly) => save({ ...settings.values, tidyWeekly })}
           />
-          {TIDY_TEXTS.map(input)}
-          {saveAction}
         </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="Project scans">
+      <SettingsSection title="Project files">
         <SettingsCard>
           <SettingsSelect
-            label="Create memories from projects automatically"
-            hint="For every project with an open workspace (git or not), runs Create from project with the tidy provider; weekly also re-checks saved memories against the files. Results wait for review unless the repo has auto-approve on. Each scan is a model call; automatic scans use at most half the daily limit, and skip repos with memory or capture off."
+            label="Suggest from project files automatically"
+            hint="For every project with an open workspace. Uses at most half the background runs per day, and skips projects with memory or session suggestions off."
             value={settings.values.projectAutoScan}
             options={PROJECT_AUTO_SCAN_OPTIONS}
             disabled={settings.saving}
             onValueChange={(projectAutoScan) => save({ ...settings.values, projectAutoScan })}
           />
+        </SettingsCard>
+      </SettingsSection>
+      <SettingsSection title="Advanced" info="Prompt size, hiding unused memories, timing and limits for background runs, models, guidance, and the tools port.">
+        <SettingsCard>
+          <SettingsSelect
+            label="Clean-up and project files provider"
+            hint="Reads saved memories or project files and suggests changes."
+            value={settings.values.tidyProvider}
+            options={TIDY_PROVIDER_OPTIONS}
+            disabled={settings.saving}
+            onValueChange={(tidyProvider) => save({ ...settings.values, tidyProvider })}
+          />
+        </SettingsCard>
+        <SettingsCard>
+          {ADVANCED_NUMBERS.map(input)}
+          {ADVANCED_TEXTS.map(input)}
+          {saveAction}
         </SettingsCard>
       </SettingsSection>
     </>

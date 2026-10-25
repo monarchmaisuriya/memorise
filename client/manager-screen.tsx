@@ -2,15 +2,17 @@ import { type PluginScreenProps, useRpc } from "@getpaseo/plugin/client";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { type BulkAction, bulkMemoryRpc, isFolderKey, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, proposalsSummaryRpc, searchMemoriesRpc, tidyMemoryRpc } from "../shared/memory";
+import { type BulkAction, bulkMemoryRpc, isFolderKey, listMemoriesRpc, listProposalsRpc, listReposRpc, memoryTypeSchema, proposalsSummaryRpc, scanProjectRpc, searchMemoriesRpc, tidyMemoryRpc } from "../shared/memory";
 import { FactCard } from "./fact-card";
 import { FactEditor } from "./fact-editor";
 import { Inbox } from "./inbox";
-import { activeFilters, applyFilters, ATTENTION, attentionGroups, type Control, CONTROL_LABEL, DEFAULT_FILTERS, type ListedFact, mergeScopes, shownSelection, type ViewFilters } from "./manager-view";
+import { activeFilters, applyFilters, ATTENTION, attentionGroups, type Control, CONTROL_LABEL, DEFAULT_FILTERS, type ListedFact, mergeScopes, shownSelection, SORT_LABEL, STATUS_LABEL, type ViewFilters } from "./manager-view";
 import { memoryChanged, onMemoryChanged } from "./memory-events";
-import { Button, Chip, type Styles, useStyles } from "./panel-ui";
+import { announce } from "./notices";
+import { Button, Chip, NoticeBar, type Styles, useStyles } from "./panel-ui";
 import { RepoPrefsCard, TransferCard } from "./repo-tools";
 import { MemorySettingsScreen } from "./settings-screen";
+import { count, errorText, KIND, projectDetail, projectName, relativeDate } from "./copy";
 
 const GLOBAL = "global";
 const ATTENTION_VIEW = "attention";
@@ -22,7 +24,7 @@ const BULK: { action: BulkAction; label: string }[] = [
   { action: "unpin", label: "Unpin" },
   { action: "enable", label: "Turn on" },
   { action: "disable", label: "Turn off" },
-  { action: "retire", label: "Retire" },
+  { action: "retire", label: "Archive" },
   { action: "restore", label: "Restore" },
 ];
 
@@ -47,15 +49,15 @@ function FilterPanel({ filters, setFilters, searching, styles }: { filters: View
   return (
     <View style={[styles.card, { gap: 10 }]}>
       {group(
-        "Status",
-        (["current", "retired", "replaced", "all"] as const).map((value) => <Chip key={value} label={value} on={filters.status === value} onPress={() => setFilters({ ...filters, status: value })} styles={styles} />),
+        "Show",
+        (["current", "retired", "replaced", "all"] as const).map((value) => <Chip key={value} label={STATUS_LABEL[value]} on={filters.status === value} onPress={() => setFilters({ ...filters, status: value })} styles={styles} />),
       )}
-      {group("Type", [
-        <Chip key="any" label="any type" on={filters.type === "any"} onPress={() => setFilters({ ...filters, type: "any" })} styles={styles} />,
-        ...memoryTypeSchema.options.map((value) => <Chip key={value} label={value} on={filters.type === value} onPress={() => setFilters({ ...filters, type: value })} styles={styles} />),
+      {group("Kind", [
+        <Chip key="any" label="Any" on={filters.type === "any"} onPress={() => setFilters({ ...filters, type: "any" })} styles={styles} />,
+        ...memoryTypeSchema.options.map((value) => <Chip key={value} label={KIND[value]} on={filters.type === value} onPress={() => setFilters({ ...filters, type: value })} styles={styles} />),
       ])}
       {group(
-        "Control",
+        "Visibility",
         (Object.keys(CONTROL_LABEL) as Control[]).map((value) => <Chip key={value} label={CONTROL_LABEL[value]} on={filters.control === value} onPress={() => setFilters({ ...filters, control: value })} styles={styles} />),
       )}
       {searching ? (
@@ -63,19 +65,21 @@ function FilterPanel({ filters, setFilters, searching, styles }: { filters: View
       ) : (
         group(
           "Sort",
-          (["changed", "created", "most used", "least used"] as const).map((value) => <Chip key={value} label={value} on={filters.sort === value} onPress={() => setFilters({ ...filters, sort: value })} styles={styles} />),
+          (["changed", "created", "most used", "least used"] as const).map((value) => <Chip key={value} label={SORT_LABEL[value]} on={filters.sort === value} onPress={() => setFilters({ ...filters, sort: value })} styles={styles} />),
         )
       )}
     </View>
   );
 }
 
-// One scope's memories: global, or one repo with its proposals and tools.
-function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Styles }) {
+// One scope's memories: global, or one project with its suggestions and settings. `label` is a
+// folder project's current name.
+function MemoriesView({ repoKey, label, styles }: { repoKey: string | null; label: string | null; styles: Styles }) {
   const list = useRpc(listMemoriesRpc);
   const search = useRpc(searchMemoriesRpc);
   const bulk = useRpc(bulkMemoryRpc);
   const listProposals = useRpc(listProposalsRpc);
+  const scan = useRpc(scanProjectRpc);
   const where = useMemo(() => ({ repoKey }), [repoKey]);
   const scope = repoKey ? "repo" : "global";
   const [tab, setTab] = useState<"memories" | "proposed">("memories");
@@ -98,7 +102,13 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
   // A change to what is chosen disarms a pending "Confirm delete".
   useEffect(() => setConfirmDelete(false), [chosen.length]);
   const runBulk = useMutation({
-    mutationFn: (action: BulkAction) => bulk({ where, ids: chosen, action }),
+    mutationFn: async (action: BulkAction) => {
+      const result = await bulk({ where, ids: chosen, action });
+      // Archiving takes the memories out of this list, so the notice above it offers Undo.
+      const archived = result.results.filter((item) => item.ok).map((item) => item.id);
+      if (action === "retire" && archived.length > 0) announce({ text: `Archived ${count(archived.length, "memory", "memories")}`, undo: () => bulk({ where, ids: archived, action: "restore" }) });
+      return result;
+    },
     onSuccess: () => {
       setSelected(new Set());
       setConfirmDelete(false);
@@ -107,6 +117,13 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
   });
   const active = activeFilters(filters, trimmed !== "");
   const pending = proposals.data?.proposals.length ?? 0;
+  const anyInScope = (facts.data?.facts ?? []).some((fact) => fact.scope === scope);
+  const subjectOf = (id: string) => facts.data?.facts.find((fact) => fact.id === id)?.subject ?? id;
+  // The empty project's one next step: suggest memories from its files, shown in Suggestions.
+  const suggest = useMutation({
+    mutationFn: () => scan({ where, mode: "create" }),
+    onSuccess: () => setTab("proposed"),
+  });
 
   const toggle = (id: string) =>
     setSelected((current) => {
@@ -123,22 +140,30 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
 
   return (
     <View style={{ gap: 12 }}>
-      <Text style={styles.title}>{repoKey ?? "Global memory"}</Text>
-      <Text style={styles.muted}>{repoKey ? (isFolderKey(repoKey) ? "A folder outside git: its memories reach agents started in this folder." : "Shared by every clone and worktree of this repo.") : "Your own memories; they reach agents in every repo."}</Text>
+      <Text style={styles.title}>{projectName(repoKey, label)}</Text>
+      {repoKey && <Text style={styles.muted}>{projectDetail(repoKey)}</Text>}
+      <Text style={styles.muted}>
+        {repoKey
+          ? isFolderKey(repoKey)
+            ? "A folder outside git. Its memories reach agents started in it or in its subfolders."
+            : "Shared by every clone and worktree of this project."
+          : "Global memories reach agents in every project."}
+      </Text>
       {repoKey && (
         <View style={styles.row}>
           <Chip label="Memories" on={tab === "memories"} onPress={() => setTab("memories")} styles={styles} />
-          <Chip label={pending > 0 ? `Proposed · ${pending}` : "Proposed"} on={tab === "proposed"} onPress={() => setTab("proposed")} styles={styles} />
+          <Chip label={pending > 0 ? `Suggestions · ${pending}` : "Suggestions"} on={tab === "proposed"} onPress={() => setTab("proposed")} styles={styles} />
         </View>
       )}
+      <NoticeBar styles={styles} />
       {tab === "proposed" && repoKey ? (
         <Inbox where={where} styles={styles} onChanged={() => memoryChanged()} />
       ) : (
         <>
           <View style={styles.row}>
-            <Button label={adding ? "Close new memory" : "New memory"} styles={styles} onPress={() => setAdding((value) => !value)} />
+            <Button label={adding ? "Cancel new memory" : "New memory"} styles={styles} onPress={() => setAdding((value) => !value)} />
             <Button label={selecting ? "Done selecting" : "Select"} styles={styles} onPress={() => (selecting ? stopSelecting() : setSelecting(true))} />
-            <Button label={showTools ? (repoKey ? "Hide repo tools" : "Hide import and export") : repoKey ? "Repo tools" : "Import and export"} styles={styles} onPress={() => setShowTools((value) => !value)} />
+            <Button label={showTools ? (repoKey ? "Hide project settings" : "Hide import and export") : repoKey ? "Project settings" : "Import and export"} styles={styles} onPress={() => setShowTools((value) => !value)} />
           </View>
           {adding && <FactEditor where={where} defaultScope={scope} hasRepo={repoKey !== null} styles={styles} onDone={() => setAdding(false)} />}
           {showTools && (
@@ -148,7 +173,7 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
             </>
           )}
           <View style={[styles.row, { flexWrap: "nowrap" }]}>
-            <TextInput accessibilityLabel="Search memories" value={query} onChangeText={setQuery} placeholder="Search subjects, text, and paths" style={[styles.input, { minHeight: 0, flex: 1 }]} />
+            <TextInput accessibilityLabel="Search memories" value={query} onChangeText={setQuery} placeholderTextColor={styles.muted.color} placeholder="Search titles, text, and files" style={[styles.input, { minHeight: 0, flex: 1 }]} />
             <Button label={`${showFilters ? "Hide filters" : "Filters"}${active.length > 0 ? ` · ${active.length}` : ""}`} styles={styles} onPress={() => setShowFilters((value) => !value)} />
           </View>
           {active.length > 0 && (
@@ -156,31 +181,67 @@ function MemoriesView({ repoKey, styles }: { repoKey: string | null; styles: Sty
               {active.map((filter) => (
                 <Chip key={filter.key} label={`${filter.label} ✕`} on onPress={() => setFilters({ ...filters, [filter.key]: DEFAULT_FILTERS[filter.key] })} styles={styles} />
               ))}
-              <Button label="Clear" styles={styles} onPress={() => setFilters(DEFAULT_FILTERS)} />
+              <Button label="Clear filters" styles={styles} onPress={() => setFilters(DEFAULT_FILTERS)} />
             </View>
           )}
           {showFilters && <FilterPanel filters={filters} setFilters={setFilters} searching={trimmed !== ""} styles={styles} />}
-          {found.error && <Text style={styles.danger}>{found.error.message}</Text>}
+          {found.error && <Text style={styles.danger}>{errorText(found.error)}</Text>}
           {selecting && (
             <View style={[styles.card, styles.row]}>
               <Text style={styles.body}>{chosen.length} selected</Text>
               <Button label="Select all shown" styles={styles} onPress={() => setSelected(new Set(shown.map((fact) => fact.id)))} />
               {chosen.length > 0 &&
                 BULK.map(({ action, label }) => <Button key={action} label={label} styles={styles} onPress={() => runBulk.mutate(action)} />)}
-              {chosen.length > 0 && (
-                <Button label={confirmDelete ? `Confirm delete ${chosen.length}` : "Delete"} tone="danger" styles={styles} onPress={() => (confirmDelete ? runBulk.mutate("delete") : setConfirmDelete(true))} />
-              )}
+              {chosen.length > 0 && !confirmDelete && <Button label="Delete" tone="danger" styles={styles} onPress={() => setConfirmDelete(true)} />}
+            </View>
+          )}
+          {selecting && confirmDelete && chosen.length > 0 && (
+            <View style={[styles.card, styles.row]}>
+              <Text style={[styles.body, { flexShrink: 1 }]}>Delete {count(chosen.length, "memory", "memories")}? This can't be undone.</Text>
+              <Button label={`Delete ${chosen.length}`} tone="danger" styles={styles} onPress={() => runBulk.mutate("delete")} />
+              <Button label="Cancel" styles={styles} onPress={() => setConfirmDelete(false)} />
             </View>
           )}
           {runBulk.data?.results.filter((result) => !result.ok).map((result) => (
             <Text key={result.id} style={styles.danger}>
-              {result.id}: {result.error}
+              “{subjectOf(result.id)}”: {result.error}
             </Text>
           ))}
-          {runBulk.error && <Text style={styles.danger}>{runBulk.error.message}</Text>}
+          {runBulk.error && <Text style={styles.danger}>{errorText(runBulk.error)}</Text>}
           {facts.isPending && <Text style={styles.muted}>Loading memories</Text>}
-          {facts.error && <Text style={styles.danger}>{facts.error.message}</Text>}
-          {facts.data && <Text style={styles.muted}>{shown.length === 0 ? "No memories match." : `${shown.length} shown`}</Text>}
+          {facts.error && <Text style={styles.danger}>{errorText(facts.error)}</Text>}
+          {facts.data && !anyInScope && trimmed === "" && (
+            <View style={styles.card}>
+              <Text style={styles.body}>No memories yet</Text>
+              <Text style={styles.muted}>
+                {repoKey ? "Agents save what they learn about this project here. You can also suggest memories from its files." : "Add a preference or fact that applies to every project."}
+              </Text>
+              <View style={styles.row}>
+                {repoKey ? (
+                  <Button label={suggest.isPending ? "Starting" : "Suggest from project files"} disabled={suggest.isPending} styles={styles} onPress={() => suggest.mutate()} />
+                ) : (
+                  <Button label="New memory" styles={styles} onPress={() => setAdding(true)} />
+                )}
+              </View>
+              {suggest.error && <Text style={styles.danger}>{errorText(suggest.error)}</Text>}
+            </View>
+          )}
+          {facts.data && (anyInScope || trimmed !== "") && shown.length === 0 && (
+            <View style={styles.card}>
+              <Text style={styles.body}>No memories match</Text>
+              <View style={styles.row}>
+                <Button
+                  label="Clear search and filters"
+                  styles={styles}
+                  onPress={() => {
+                    setQuery("");
+                    setFilters(DEFAULT_FILTERS);
+                  }}
+                />
+              </View>
+            </View>
+          )}
+          {shown.length > 0 && <Text style={styles.muted}>{count(shown.length, "memory", "memories")}</Text>}
           {shown.map((fact) => (
             <FactCard key={fact.id} fact={fact} where={where} hasRepo={repoKey !== null} styles={styles} selected={selected.has(fact.id)} onSelect={selecting ? () => toggle(fact.id) : undefined} />
           ))}
@@ -206,14 +267,19 @@ function RepoProposalsCard({ repoKey, pending, open, onToggle, styles }: { repoK
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`${open ? "Collapse" : "Expand"} ${repoKey}, ${pending} waiting`}
+        accessibilityLabel={`${open ? "Collapse" : "Expand"} ${projectName(repoKey)}, ${pending} to review`}
         onPress={onToggle}
         style={[styles.row, { justifyContent: "space-between", flexWrap: "nowrap" }]}
       >
-        <Text style={[styles.body, { flexShrink: 1 }]} numberOfLines={1}>
-          {open ? "▾" : "▸"} {repoKey}
-        </Text>
-        <Text style={styles.muted}>{pending} waiting</Text>
+        <View style={{ flexShrink: 1 }}>
+          <Text style={styles.body} numberOfLines={1}>
+            {open ? "▾" : "▸"} {projectName(repoKey)}
+          </Text>
+          <Text style={styles.muted} numberOfLines={1}>
+            {projectDetail(repoKey)}
+          </Text>
+        </View>
+        <Text style={styles.muted}>{pending} to review</Text>
       </Pressable>
       {open && <Inbox where={{ repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} />}
     </View>
@@ -231,16 +297,16 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
       if (!next.delete(repoKey)) next.add(repoKey);
       return next;
     });
-  // Each repo is tidied on its own, so one refusal (daily limit, a tidy already running) does not stop the rest.
+  // Each project is cleaned up on its own, so one refusal (daily limit, one already running) does not stop the rest.
   const tidyAll = useMutation({
     mutationFn: async () => {
       const results: string[] = [];
       for (const repoKey of repoKeys) {
         try {
           await tidy({ where: { repoKey } });
-          results.push(`${repoKey}: started`);
+          results.push(`${projectName(repoKey)}: clean-up started`);
         } catch (error) {
-          results.push(`${repoKey}: ${error instanceof Error ? error.message : String(error)}`);
+          results.push(`${projectName(repoKey)}: ${errorText(error)}`);
         }
       }
       return results;
@@ -249,14 +315,14 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
   const total = pending.reduce((sum, repo) => sum + repo.pending, 0);
   return (
     <View style={{ gap: 12 }}>
-      <Text style={styles.title}>Proposals</Text>
+      <Text style={styles.title}>Suggestions</Text>
       <Text style={styles.muted}>
         {total === 0
-          ? "No proposals waiting. Capture, tidy, and project scans (in a repo's Proposed tab) add them here."
-          : "Proposed memories and changes from capture, tidy, and project scans, across every repo. Nothing reaches agents until you approve it, unless the repo has auto-approve on."}
+          ? "Nothing to review. Suggestions from sessions, project files, and clean-ups appear here."
+          : "Memories and changes suggested by sessions, project files, and clean-ups, across every project. Nothing reaches agents until you approve it, unless a project saves suggestions without review."}
       </Text>
       <View style={styles.row}>
-        <Button label={tidyAll.isPending ? "Starting tidy" : `Tidy all repos (${repoKeys.length})`} disabled={tidyAll.isPending} styles={styles} onPress={() => tidyAll.mutate()} />
+        <Button label={tidyAll.isPending ? "Starting clean-up" : `Clean up all projects (${repoKeys.length})`} disabled={tidyAll.isPending || repoKeys.length === 0} styles={styles} onPress={() => tidyAll.mutate()} />
         {pending.length > 1 && <Button label={allOpen ? "Collapse all" : "Expand all"} styles={styles} onPress={() => setOpen(allOpen ? new Set() : new Set(pending.map((repo) => repo.repoKey)))} />}
       </View>
       {tidyAll.data?.map((line) => (
@@ -278,7 +344,8 @@ function AttentionView({ facts, styles }: { facts: ListedFact[]; styles: Styles 
   return (
     <View style={{ gap: 12 }}>
       <Text style={styles.title}>Needs attention</Text>
-      <Text style={styles.muted}>{total === 0 ? "Nothing needs a look right now." : "Memories agents cannot see, or have never used. Edit, pin, turn on, or retire each one."}</Text>
+      <Text style={styles.muted}>{total === 0 ? "Nothing to look at. Memories agents can't see, or never use, appear here." : "Memories agents can't see, or have never used. Edit, pin, turn on, or archive each one."}</Text>
+      <NoticeBar styles={styles} />
       {ATTENTION.map(({ reason, title, rule }) => {
         const items = groups[reason] ?? [];
         if (items.length === 0) return null;
@@ -326,19 +393,26 @@ export function ManagerScreen(props: PluginScreenProps) {
 
   const repoEntries = shownRepos.map((repo) => ({
     id: repo.repoKey ?? GLOBAL,
-    label: repo.label ? `${repo.label} (folder)` : (repo.repoKey ?? "Global (every repo)"),
-    detail: `${repo.active} active${repo.retired > 0 ? ` · ${repo.retired} retired` : ""}${repo.lastModified ? ` · changed ${repo.lastModified.slice(0, 10)}` : ""}`,
+    label: projectName(repo.repoKey, repo.label),
+    detail: [
+      repo.repoKey === null ? "Every project" : isFolderKey(repo.repoKey) ? "Folder" : null,
+      repo.active > 0 ? count(repo.active, "memory", "memories") : "No memories yet",
+      repo.retired > 0 ? `${repo.retired} archived` : null,
+      repo.lastModified ? `changed ${relativeDate(repo.lastModified)}` : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · "),
   }));
   const manageEntries = [
-    { id: PROPOSALS_VIEW, label: "Proposals", detail: pendingTotal > 0 ? `${pendingTotal} waiting` : "none waiting" },
-    { id: ATTENTION_VIEW, label: "Needs attention", detail: attentionCount > 0 ? `${attentionCount} to review` : "nothing to review" },
-    { id: SETTINGS_VIEW, label: "Settings", detail: "memory, capture, tidy" },
+    { id: PROPOSALS_VIEW, label: "Suggestions", detail: pendingTotal > 0 ? `${pendingTotal} to review` : "Nothing to review" },
+    { id: ATTENTION_VIEW, label: "Needs attention", detail: attentionCount > 0 ? `${attentionCount} to look at` : "Nothing to look at" },
+    { id: SETTINGS_VIEW, label: "Settings", detail: "Memory, suggestions, clean-up" },
   ];
   // Narrow layouts show the same entries as one wrapping row of chips above the content.
   const nav = layout.compact ? (
     <View style={{ gap: 8 }}>
       <Text style={styles.title}>Memorise</Text>
-      {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
+      {repos.error && <Text style={styles.danger}>{errorText(repos.error)}</Text>}
       <View style={styles.row}>
         {[...repoEntries, ...manageEntries].map((entry) => (
           <Chip key={entry.id} label={entry.id === ATTENTION_VIEW && attentionCount > 0 ? `${entry.label} · ${attentionCount}` : entry.id === PROPOSALS_VIEW && pendingTotal > 0 ? `${entry.label} · ${pendingTotal}` : entry.label} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
@@ -348,7 +422,7 @@ export function ManagerScreen(props: PluginScreenProps) {
   ) : (
     <View style={{ gap: 4, width: 260 }}>
       <Text style={styles.title}>Memorise</Text>
-      {repos.error && <Text style={styles.danger}>{repos.error.message}</Text>}
+      {repos.error && <Text style={styles.danger}>{errorText(repos.error)}</Text>}
       <Text style={styles.label}>Memories</Text>
       {repoEntries.map((entry) => (
         <NavItem key={entry.id} label={entry.label} detail={entry.detail} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
@@ -371,14 +445,14 @@ export function ManagerScreen(props: PluginScreenProps) {
           </>
         ) : view === PROPOSALS_VIEW ? (
           proposals.error ? (
-            <Text style={styles.danger}>{proposals.error.message}</Text>
+            <Text style={styles.danger}>{errorText(proposals.error)}</Text>
           ) : (
             <ProposalsView pending={proposals.data?.repos ?? []} repoKeys={listed.flatMap((repo) => (repo.repoKey && repo.active >= 2 ? [repo.repoKey] : []))} styles={styles} />
           )
         ) : view === ATTENTION_VIEW ? (
-          all.error ? <Text style={styles.danger}>{all.error.message}</Text> : all.pending ? <Text style={styles.muted}>Loading memories</Text> : <AttentionView facts={all.facts} styles={styles} />
+          all.error ? <Text style={styles.danger}>{errorText(all.error)}</Text> : all.pending ? <Text style={styles.muted}>Loading memories</Text> : <AttentionView facts={all.facts} styles={styles} />
         ) : (
-          <MemoriesView key={view} repoKey={view === GLOBAL ? null : view} styles={styles} />
+          <MemoriesView key={view} repoKey={view === GLOBAL ? null : view} label={shownRepos.find((repo) => repo.repoKey === view)?.label ?? null} styles={styles} />
         )}
       </View>
     </ScrollView>

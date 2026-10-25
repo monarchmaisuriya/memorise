@@ -1,6 +1,7 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { dismissNotice, type Notice, onNotice, undoNotice } from "./notices";
 
 type Theme = PluginWorkspacePanelProps["theme"];
 export function useStyles(theme: Theme, compact: boolean) {
@@ -54,5 +55,21 @@ export function Button({ label, onPress, styles, tone, disabled = false }: { lab
     <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={styles.button}>
       <Text style={disabled ? styles.muted : tone === "danger" ? styles.danger : styles.chipText}>{label}</Text>
     </Pressable>
+  );
+}
+
+// The latest notice (such as "Archived …") with Undo, above a list of memories.
+export function NoticeBar({ styles }: { styles: Styles }) {
+  const [notice, setNotice] = useState<Notice | null>(null);
+  useEffect(() => onNotice(setNotice), []);
+  if (!notice) return null;
+  return (
+    <View style={[styles.card, styles.row, { justifyContent: "space-between" }]} accessibilityLiveRegion="polite">
+      <Text style={[notice.tone === "danger" ? styles.danger : styles.body, { flexShrink: 1 }]}>{notice.text}</Text>
+      <View style={styles.row}>
+        {notice.undo && <Button label="Undo" styles={styles} onPress={() => void undoNotice()} />}
+        <Button label="Dismiss" styles={styles} onPress={dismissNotice} />
+      </View>
+    </View>
   );
 }

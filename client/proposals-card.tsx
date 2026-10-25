@@ -4,6 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, type proposalsCardSchema, rejectProposalRpc } from "../shared/memory";
 import { memoryChanged } from "./memory-events";
+import { errorText } from "./copy";
 
 type CardData = z.infer<typeof proposalsCardSchema>;
 type Theme = PluginTimelineItemProps<CardData>["theme"];
@@ -32,8 +33,8 @@ function Pending({ agentId, workspaceId, theme, openPanel }: { agentId: string; 
     },
   });
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
-  if (query.isPending) return <Text style={muted}>Loading proposals</Text>;
-  if (query.error) return <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{query.error.message}</Text>;
+  if (query.isPending) return <Text style={muted}>Loading suggestions</Text>;
+  if (query.error) return <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{errorText(query.error)}</Text>;
   const mine = query.data.proposals.filter((proposal) => proposal.source.agentId === agentId);
   return (
     <View style={{ gap: 8 }}>
@@ -53,9 +54,9 @@ function Pending({ agentId, workspaceId, theme, openPanel }: { agentId: string; 
           </View>
         </View>
       ))}
-      {decide.error && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{decide.error.message}</Text>}
-      <Pressable accessibilityRole="button" accessibilityLabel="Edit proposed memories in the panel" onPress={() => openPanel(workspaceId)} style={action(theme, false)}>
-        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Edit in the panel</Text>
+      {decide.error && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{errorText(decide.error)}</Text>}
+      <Pressable accessibilityRole="button" accessibilityLabel="Edit suggestions in the Memorise panel" onPress={() => openPanel(workspaceId)} style={action(theme, false)}>
+        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Edit in the Memorise panel</Text>
       </Pressable>
     </View>
   );
@@ -69,8 +70,8 @@ export function ProposalsCard({ agentId, item, theme, openPanel }: PluginTimelin
     <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, padding: 10, gap: 6, backgroundColor: theme.colors.surface1 }}>
       <Text style={{ color: theme.colors.foreground, fontSize: 14 }}>
         {[
-          autoSaved > 0 ? `${autoSaved === 1 ? "1 memory" : `${autoSaved} memories`} saved automatically (auto-approve is on for this repo)` : null,
-          count > 0 ? `${count === 1 ? "1 memory" : `${count} memories`} proposed; nothing reaches agents until you approve it` : null,
+          count > 0 ? `${count === 1 ? "1 memory" : `${count} memories`} suggested from this session. Nothing reaches agents until you approve it` : null,
+          autoSaved > 0 ? `${autoSaved === 1 ? "1 memory" : `${autoSaved} memories`} saved without review (this project saves suggestions without review)` : null,
         ]
           .filter(Boolean)
           .join(". ")}
@@ -79,7 +80,7 @@ export function ProposalsCard({ agentId, item, theme, openPanel }: PluginTimelin
       {workspaceId ? (
         <Pending agentId={agentId} workspaceId={workspaceId} theme={theme} openPanel={openPanel} />
       ) : (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in the Memorise panel of this repo's workspace.</Text>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in Memorise, under Suggestions.</Text>
       )}
     </View>
   );

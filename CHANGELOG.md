@@ -4,6 +4,42 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-25
+
+### Changed
+
+- Plain words everywhere you look, from one glossary (agents' tools and stored data keep their names):
+  - repo → project;
+  - Retire → Archive;
+  - replaced → older version;
+  - Proposed / Proposals → Suggestions;
+  - Capture → Suggestions from sessions;
+  - Tidy → Clean up;
+  - Create from project / Re-check against project → Suggest from project files / Check memories against project files;
+  - Auto-approve new memories → Save suggestions without review;
+  - Host setting → Use global setting;
+  - Listed / Only for matching files / Search only → Always / When matching files change / Only when searched;
+  - Until → Expires on;
+  - What agents get → What agents see;
+  - Repo tools → Project settings.
+- Project settings are real switches with fixed labels that say what "on" means, and they apply at once.
+- Settings has a short main level (6 settings) and an Advanced section for limits, timing, models, and the tools port. Every description is one or two sentences and states its default.
+- A memory card says who saved it, when ("3 days ago"), and how agents used it ("Not used yet"); cited files sit behind "Cites N files".
+- The editor has visible labels (Title, Memory, Kind, About files, Expires on) and a real on/off switch.
+- Each suggestion says where it came from (a session, project files, or a clean-up), which provider, and when, plus why when there is a reason.
+- Projects are shown by their short name, with the full key underneath.
+- Errors show only their own message, without Paseo's "Request failed: … requestType=… code=…" wrapping, and a pasted import that is not valid JSON says so without a raw "SyntaxError".
+- Example text in empty fields is dimmed, so it can't be mistaken for content.
+
+### Added
+
+- Undo after archiving a memory, archiving several, or moving one between a project and Global.
+- Empty states that say what to do next: "Suggest from project files" for a project with no memories, "Clear search and filters" when nothing matches.
+
+### Removed
+
+- The confirmation before "Approve all": an approved memory can be archived afterwards. Deleting and "Reject all" still ask, and name what they affect.
+
 ## [0.6.2] - 2026-10-24
 
 ### Changed
@@ -128,7 +164,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.7.0
 [0.6.2]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.2
 [0.6.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.1
 [0.6.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.0
