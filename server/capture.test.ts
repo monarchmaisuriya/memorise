@@ -220,6 +220,17 @@ describe("capture", () => {
     expect(fake.created).toHaveLength(3);
   });
 
+  it("runs the weekly clean-up of each due project when it first sees Paseo, not only an hour after start", async () => {
+    values = { ...values, tidyWeekly: true };
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    for (const subject of ["one", "two"]) await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject, body: `${subject} body.`, supersedes: null, source, citations: [] });
+    capture.startWeeklyTidy(async () => [REPO]);
+    const fake = fakePaseo([], JSON.stringify({ actions: [] }));
+    capture.remember(fake.paseo);
+    await vi.waitFor(() => expect(capture.lastRun(REPO)).toMatchObject({ kind: "tidy", state: "done" }));
+    expect(fake.created).toHaveLength(1);
+  });
+
   it("re-checks a project a week after its last scan when set to weekly", async () => {
     values = { ...values, projectAutoScan: "weekly" };
     await writeFile(join(cwd, "README.md"), "Run make dev.\n");

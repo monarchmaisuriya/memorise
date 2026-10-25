@@ -69,6 +69,7 @@ export class Capture {
   private readonly statePath: string;
   private paseo: PaseoApi | null = null;
   private tidyTimer: ReturnType<typeof setInterval> | null = null;
+  private tidyRepoKeys: (() => Promise<string[]>) | null = null;
   private projectScanTimer: ReturnType<typeof setInterval> | null = null;
   // Automatic project scans run one after another, whichever trigger started them.
   private autoScans: Promise<unknown> = Promise.resolve();
@@ -94,6 +95,7 @@ export class Capture {
     void this.sweepLeftoverWorkers(paseo)
       .catch((error: unknown) => console.error(`[memorise] could not remove leftover workers: ${String(error)}`))
       .then(() => this.sweepProjects())
+      .then(() => this.sweepTidy())
       .catch((error: unknown) => console.error(`[memorise] automatic project scans failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
@@ -481,24 +483,26 @@ export class Capture {
     return added.length;
   }
 
-  // With tidyWeekly on, each repo with memories is tidied at most once a week (checked hourly).
+  // With tidyWeekly on, each repo with memories is tidied at most once a week: checked when the
+  // plugin first sees Paseo (so a reload does not push it back an hour), then hourly.
   startWeeklyTidy(repoKeys: () => Promise<string[]>): void {
-    this.tidyTimer = setInterval(() => {
-      void (async () => {
-        if (!(await this.deps.settings()).tidyWeekly) return;
-        const state = await this.readState();
-        for (const repoKey of await repoKeys()) {
-          const last = state.tidiedAt[repoKey];
-          if (last && Date.now() - Date.parse(last) < TIDY_INTERVAL_MS) continue;
-          // A repo with fewer than 2 memories is not a failure; it waits until it has some.
-          const visible = (await this.deps.store.list(repoKey)).filter((fact) => fact.scope === "repo" && isVisibleToAgents(fact, 0));
-          if (visible.length < 2) continue;
-          await this.startTidy(repoKey, null)
-            .then(({ done }) => done)
-            .catch((error: unknown) => console.error(`[memorise] weekly tidy of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
-        }
-      })();
-    }, 60 * MINUTE_MS);
+    this.tidyRepoKeys = repoKeys;
+    this.tidyTimer = setInterval(() => void this.sweepTidy(), 60 * MINUTE_MS);
+  }
+
+  private async sweepTidy(): Promise<void> {
+    if (!this.tidyRepoKeys || !(await this.deps.settings()).tidyWeekly) return;
+    const state = await this.readState();
+    for (const repoKey of await this.tidyRepoKeys()) {
+      const last = state.tidiedAt[repoKey];
+      if (last && Date.now() - Date.parse(last) < TIDY_INTERVAL_MS) continue;
+      // A repo with fewer than 2 memories is not a failure; it waits until it has some.
+      const visible = (await this.deps.store.list(repoKey)).filter((fact) => fact.scope === "repo" && isVisibleToAgents(fact, 0));
+      if (visible.length < 2) continue;
+      await this.startTidy(repoKey, null)
+        .then(({ done }) => done)
+        .catch((error: unknown) => console.error(`[memorise] weekly tidy of ${repoKey} failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
   }
 
   // With projectAutoScan on, a project gets "Create from project" until one succeeds (a failed one is
