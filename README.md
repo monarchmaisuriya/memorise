@@ -16,7 +16,7 @@ The plugin's id in Paseo is `memorise`.
 - **Gives agents tools.** `memory_search`, `memory_read`, `memory_write`, `memory_update`, and `memory_retire`, over two local MCP servers.
 - **Flags stale facts.** A memory can cite files. When a cited file has changed since the memory was written, the list marks it "needs check".
 - **Refuses secrets.** Writes that look like private keys, cloud or GitHub tokens, or `password=` assignments are refused.
-- **Optionally captures and tidies.** Background agents can propose new memories from finished sessions and propose merges or retirements. Nothing reaches an agent until you approve it.
+- **Optionally suggests and cleans up.** Background agents can suggest memories from finished sessions and from a project's files, and suggest clean-ups (merging, rewriting, archiving). Nothing reaches an agent until you approve it.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.6.2
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.7.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -63,66 +63,84 @@ Only agents created after the install get memory. Agents already running keep th
 
 ## Using it
 
-- **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's repository.
-- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens the manager. Its left navigation lists global memory and every repository that has memories, an open Paseo workspace, or proposals waiting, then **Proposals**, **Needs attention**, and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise manager" and "Open Memorise manager for this repo".
-  - **A scope's memories:** search, plus a **Filters** button (status, type, controls, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, retire, restore, delete). **Repo tools** (or **Import and export** for global) holds the repository's switches and import/export. Each repository also has a **Proposed** tab with its proposals, **Create from project**, **Re-check against project**, and tidy.
-  - **Each memory:** badges for its type and controls, then Edit, Pin, Turn off, and **More** (retire or restore, make global or move to this repo, history with revert, delete). In the editor, **Options** holds files, when agents see it, on/off, and the end date.
-  - **Proposals:** every repository's waiting proposals in one place, one collapsible card per repository (with **Approve all** and **Reject all** inside), **Expand all** / **Collapse all**, and **Tidy all repos** (those with at least 2 memories) at the top.
-  - **Needs attention:** across global and every repository, the memories agents cannot see (turned off, ended, or hidden after going unused) and those never shown, read, or found 14 days after they were saved.
-  - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving the manager.
-- **Work inside a workspace:** the Memorise workspace panel lists the repository's memories and the global ones, with the same card and editor, and "Open in manager".
-- **See what agents get:** the panel's "What agents get" tab shows exactly what a new agent started in that workspace would be given, why each memory is listed (pinned, about files this worktree changed, global, or this repo), and how much of the prompt budget (lines and KB) it uses.
-- **Review proposals:** approve or reject captured memories straight from the "memories proposed" card in the agent's chat, or edit them first in the Proposed tab of the panel or the manager. With several waiting, **Approve all** and **Reject all** decide them together.
+- **Save a memory from the composer:** `/remember [--global] [preference|decision|gotcha|howto|reference:] <fact>`. Without `--global` it is saved for the workspace's project.
+- **Manage everything from the sidebar:** the Memorise row in the sidebar header opens Memorise. Its left side lists **Global** and every project that has memories, an open Paseo workspace, or suggestions waiting, then **Suggestions**, **Needs attention**, and **Settings**. Show, hide, or move the row in Paseo's Settings > Sidebar. The Command Center has "Open Memorise for all projects" and "Open Memorise for this project".
+  - **A project's memories:** search, plus **Filters** (show, kind, visibility, sort); active filters show as chips you can remove. **Select** turns on bulk actions (pin, turn on or off, archive, restore, delete). **Project settings** (or **Import and export** for Global) holds the project's switches and import and export. Each project also has a **Suggestions** tab with its suggestions, **Suggest from project files**, **Check memories against project files**, and **Suggest clean-ups**.
+  - **Each memory:** its kind and any setting that changes what agents see, who saved it and when, and how agents used it. Then **Edit**, **Pin**, **Turn off**, and **More** (archive, make global or move to this project, history, delete). Archiving or moving shows **Undo**; deleting asks first. In the editor, **When agents see this** holds the files it is about, when it is shown, on or off, and an expiry date.
+  - **Suggestions:** every project's suggestions in one place, one collapsible card per project (with **Approve all** and **Reject all** inside), **Expand all** / **Collapse all**, and **Clean up all projects** (those with at least 2 memories) at the top. Each suggestion says where it came from and when.
+  - **Needs attention:** across Global and every project, the memories agents can't see (off, expired, or hidden after going unused) and those not used 14 days after they were saved.
+  - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving Memorise.
+- **Work inside a workspace:** the Memorise workspace panel lists the project's memories and the global ones, with the same card and editor, and "Open in manager".
+- **See what agents see:** the panel's **What agents see** tab shows exactly what a new agent started in that workspace would see, why each memory is listed (pinned, about files this workspace changed, global, or this project), and how much prompt space (lines and KB) it uses.
+- **Review suggestions:** approve or reject them straight from the "memories suggested" card in the agent's chat, or edit them first in the Suggestions tab of the panel or Memorise.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
-### Per-memory controls
+### Words Memorise uses
 
-Set in the editor; agents can never change them.
+The screens use plain words; the agents' tools and the files on disk keep their original names.
 
-| Control | Values | Effect |
+| On screen | Means | Agents' tool or internal name |
 | --- | --- | --- |
-| When agents see it | Listed (default), Only for matching files, Title only, Search only | Listed: ranked into every new agent's list. Only for matching files: listed only when the worktree changed a file matching its paths (needs at least one path). Title only: listed by subject; the agent reads the text with `memory_read`. Search only: never listed, found only by `memory_search` |
-| On for agents | on (default) / off | Off hides it from agents' lists, search, and read without deleting it |
-| Until | a date, or empty (default) | After that day (UTC) agents no longer see it; the manager shows it as ended |
+| Project | A git repository (shared by its clones and worktrees) or a folder outside git | repo key |
+| Global | Memories for every project | global scope |
+| Archive / Restore | Hide a memory from agents and lists, and bring it back | `memory_retire`, status `retired` |
+| Older version | A version replaced by an edit, kept in History | superseded |
+| Suggestions | Memories and changes waiting for your review | proposals |
+| Suggestions from sessions | Background agents read finished sessions and suggest memories | capture |
+| Clean up | Suggest merging duplicates, rewriting unclear memories, archiving outdated ones | tidy |
+| Suggest from project files / Check memories against project files | Read the README, docs, and build files and suggest memories, or fixes to saved ones | project scan (create / refresh) |
+| Save suggestions without review | New suggested memories are saved straight away | auto-approve |
+| Always / When matching files change / Title only / Only when searched | When agents see a memory | activation `listed` / `files` / `title` / `manual` |
+| Expires on | After this day agents no longer see the memory | `until` |
 
-A pinned memory is always listed in full. Editing the subject, text, type, or paths saves a new version (kept in History); changing a control does not.
+### When agents see a memory
 
-### Per-repository switches
+Set in the editor; agents can never change these.
 
-In the manager or the panel's "What agents get" tab, shared by every clone and worktree of the repository:
+| Setting | Values | Effect |
+| --- | --- | --- |
+| Show it to agents | Always (default), When matching files change, Title only, Only when searched | Always: ranked into every new agent's list. When matching files change: listed only when the workspace changed a file it is about (needs at least one file pattern). Title only: agents see the title and open the memory with `memory_read`. Only when searched: never listed, found only by `memory_search` |
+| On for agents | on (default) / off | Off hides it from agents' lists, search, and reading without deleting it |
+| Expires on | a date, or empty (default) | After that day (UTC) agents no longer see it; Memorise shows it as expired |
 
-- **Memory on / off:** off gives new agents in this repo no memories and no memory tools.
-- **Includes global memories / Repo memories only:** keeps your global memories out of this repo's agents (list, search, and read).
-- **Capture:** follow the host setting, or turn capture on or off for this repo only.
-- **Auto-approve new memories:** off by default. On, new memories that capture or a project scan propose are saved without waiting for you, marked "auto", and hidden after going unused like an agent's. Rewrites, retirements, and tidy's proposals still wait for you.
+A pinned memory is always listed in full. Editing the title, text, kind, or files saves a new version (kept in History); changing when agents see it does not.
+
+### Project settings
+
+In **Project settings** or the panel's **What agents see** tab, shared by every clone and worktree of the project. Each switch applies at once:
+
+- **Memory for this project:** off gives new agents here no memories and no memory tools.
+- **Include global memories:** off keeps your global memories away from this project's agents (list, search, and reading).
+- **Suggestions from sessions:** use the global setting, or turn suggestions from sessions on or off for this project only.
+- **Save suggestions without review:** off by default. On, new memories suggested by sessions and project files are saved without waiting for you, marked "Saved without review", and hidden after going unused like an agent's. Rewrites, archives, and clean-ups still wait for you.
 
 ### Import and export
 
-Export a repository's (or global) current memories as Markdown, one `- [type] subject: body` line each, or as JSON, which keeps paths and controls. Import either, or the `[date] - text` lines that assistant memory exports produce. Every entry passes the same checks as a memory you save (length, no secrets); duplicates are skipped and named, and "Check" shows what would be added before anything is written.
+Export a project's (or Global's) current memories as Markdown, one `- [kind] title: text` line each, or as JSON, which keeps files and visibility settings. Import either, or the `[date] - text` lines that assistant memory exports produce. Every entry passes the same checks as a memory you save (length, no secrets); duplicates are skipped and named, and **Preview import** shows what would be added before anything is saved.
 
 ## Settings
 
-Settings > Plugins > Memorise.
+Settings > Plugins > Memorise, or **Settings** in Memorise. The main level holds what most people change; **Advanced** holds limits, timing, models, and the tools port.
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Give new agents memory | on | |
-| Approve memory reads automatically | on | Saving, changing, or retiring asks like any other tool, unless the agent runs in a mode that skips approvals |
-| Memories listed in each new agent's prompt | 150 | 0 lists none (agents still get the tools); up to 400. The list is also capped at 8 KB |
-| Hide agent-written memories unused for (days) | 60 | 0 never hides them. Memories you saved or pinned never expire |
-| Local port for the memory tools | 6790 | Takes effect after reloading the plugin |
-| Propose memories from finished sessions | off | Capture; see below |
-| Provider that reads the session | Same as the session | So no transcript leaves the provider that ran it |
-| Capture model | empty | Only applies when one provider reads every session; empty uses the provider's default model |
-| Capture after the agent is idle for (minutes) | 20 | 5 to 240; a new turn restarts the wait |
-| Capture once you have sent at least this many new messages | 3 | 1 to 50, counted since the last capture of that session |
-| Background runs per day, at most (capture, tidy, and project scans) | 10 | 1 to 100; each run is one model call |
-| What to capture / What never to capture | empty | Optional guidance, up to 2,000 characters each |
-| Provider that tidies / Tidy model | claude / empty | Also used by project scans |
-| Tidy each repo weekly | off | Tidy can also be started from the panel |
-| Create memories from projects automatically | off | Once per project, or once then a weekly re-check; see below |
+| Give agents memory | on | Off keeps saved memories |
+| Read memories without asking | on | Saving or changing a memory still asks, unless the agent runs in a mode that skips approvals |
+| Suggest memories from sessions | off | See below |
+| Provider that reads sessions | Same as the session | So no transcript leaves the provider that ran it |
+| Clean up each project weekly | off | Clean-ups can also be started by hand |
+| Suggest from project files automatically | off | Once per project, or once then check weekly; see below |
+| Advanced: Clean-up and project files provider | Claude | |
+| Advanced: Memories in each new agent's prompt | 150 | 0 lists none (agents still get the tools); up to 400. The list is also capped at 8 KB |
+| Advanced: Hide unused agent memories after (days) | 60 | 0 never hides them. Memories you saved or pinned are never hidden |
+| Advanced: Wait after a session goes quiet (minutes) | 20 | 5 to 240; a new message restarts the wait |
+| Advanced: Messages needed before suggesting | 3 | 1 to 50, counted since that session's last suggestions |
+| Advanced: Background runs per day | 10 | 1 to 100; shared by session suggestions, clean-ups, and project files; each run is one model call |
+| Advanced: Session model / Clean-up and project files model | empty | Empty uses the provider's default model; the session model applies only when one provider reads every session |
+| Advanced: What to suggest / What never to suggest | empty | Optional guidance, up to 2,000 characters each |
+| Advanced: Memory tools port | 6790 | Applies after the plugin reloads |
 
-With no model set, a provider's default model is used, which for Claude is its largest model. Set a smaller model with a fixed provider to keep capture cheap.
+With no model set, a provider's default model is used, which for Claude is its largest model. Set a smaller model with a fixed provider to keep suggestions cheap.
 
 ## How it works
 
@@ -167,14 +185,14 @@ A folder outside git is a project of its own, under a key such as `folder/notes-
 - **Ranking:** with no git history, the files changed in the last 7 days stand in for the files a checkout changed (hidden, build, and dependency folders are skipped; the walk stops at 20,000 entries, 2,000 files, or 300 ms).
 - **Citations:** pinned to the cited file's content instead of a commit; the memory is marked "needs check" when the file changes or goes.
 
-## Capture, tidy, and project scans
+## Suggestions from sessions, clean-ups, and project files
 
-Capture and weekly tidy are off until you turn them on; tidy and project scans can also be started by hand.
+Suggestions from sessions and weekly clean-ups are off until you turn them on; clean-ups and suggestions from project files can also be started by hand.
 
-- **Capture:** when a session has been idle for a while, a background agent reads a summary of what happened since the last capture and proposes memories. The summary holds your messages, the agent's replies, commands with exit codes, and files touched. Secret-shaped text is replaced before it is sent; reasoning and tool output are left out.
-- **Tidy:** proposes merging duplicates, rewording unclear memories, and retiring obsolete ones. It reads only the repository's saved memories.
-- **Project scan:** **Create from project** proposes memories from the repository's own files; **Re-check against project** also proposes rewriting or retiring saved memories those files contradict. Memorise itself reads a fixed list from the repository root: the README, the contributing guide, up to 8 `docs/*.md`, `package.json` (name, scripts, engines, package manager, workspaces), `Makefile`, `justfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `.tool-versions`, and `.nvmrc`. Each file is cut at 8 KB and all of them at 64 KB (the instruction files and build files first), symlinks, hard links, and binary files are skipped, and secret-shaped text is replaced. `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md` are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of that repository that is open as a Paseo workspace. In a folder outside git, the scan reads the folder itself.
-- **Automatic project scans:** with "Create memories from projects automatically" set to **Once per project**, every project with an open Paseo workspace (git or not) gets one Create from project scan; **Once, then re-check weekly** also re-checks it a week after its last scan. Scans start when a workspace is created, when the plugin starts, and hourly, one at a time. Automatic scans stop for the day once background runs reach half the daily limit, which leaves the rest for capture and for scans you start. A first scan that fails is tried again a day later. A scan you started by hand counts; a project with memory off, or with capture turned off for it, is skipped; the plugin's own worker folders are never scanned. The results are proposals, saved straight away only where the project has auto-approve on.
+- **Suggestions from sessions:** when a session has been quiet for a while, a background agent reads a summary of what happened since the last run and suggests memories. The summary holds your messages, the agent's replies, commands with exit codes, and files touched. Secret-shaped text is replaced before it is sent; reasoning and tool output are left out.
+- **Clean up:** suggests merging duplicates, rewording unclear memories, and archiving outdated ones. It reads only the project's saved memories.
+- **Suggest from project files:** suggests memories from the project's own files; **Check memories against project files** also suggests rewriting or archiving saved memories those files contradict. Memorise itself reads a fixed list from the repository root: the README, the contributing guide, up to 8 `docs/*.md`, `package.json` (name, scripts, engines, package manager, workspaces), `Makefile`, `justfile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `.tool-versions`, and `.nvmrc`. Each file is cut at 8 KB and all of them at 64 KB (the instruction files and build files first), symlinks, hard links, and binary files are skipped, and secret-shaped text is replaced. `AGENTS.md`, `CLAUDE.md`, and `.github/copilot-instructions.md` are sent only so the scan leaves out what agents already read. From the manager, a scan reads a checkout of that repository that is open as a Paseo workspace. In a folder outside git, the scan reads the folder itself.
+- **Automatic project files suggestions:** with "Suggest from project files automatically" set to **Once per project**, every project with an open Paseo workspace (git or not) is read once; **Once, then check weekly** also checks it a week after the last time. Scans start when a workspace is created, when the plugin starts, and hourly, one at a time. These automatic runs stop for the day once background runs reach half the daily limit, which leaves the rest for session suggestions and for runs you start. A first run that fails is tried again a day later. A run you started by hand counts; a project with memory off, or with suggestions from sessions turned off for it, is skipped; the plugin's own worker folder is never read. The results are suggestions, saved straight away only where the project saves suggestions without review.
 
 The background agents read text that may contain instructions planted in a session, so their tools are switched off and every permission request they make is denied:
 
