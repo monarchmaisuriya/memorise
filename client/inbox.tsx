@@ -1,11 +1,13 @@
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, memorySettings, rejectProposalRpc, scanProjectRpc, tidyMemoryRpc, type Where } from "../shared/memory";
 import { onMemoryChanged } from "./memory-events";
 import { Badge, Button, type Styles } from "./panel-ui";
+import { moveFocus, reviewAction } from "./review-keys";
+import { keyboardAvailable, onKey, scrollIntoView } from "./web";
 import { count, errorText, KIND, projectName, providerName, relativeDate } from "./copy";
 
 type ListedProposal = z.infer<typeof listProposalsRpc.output>["proposals"][number];
@@ -25,7 +27,13 @@ function sourceText(proposal: ListedProposal): string {
   return `${from} · ${providerName(proposal.source.provider)} · ${relativeDate(proposal.created)}`;
 }
 
-function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedProposal; where: Where; styles: Styles; onDone(): void }) {
+type CardActions = { approve(): void; reject(): void; node(): unknown };
+// One empty list, so the review keys are not re-subscribed on every render while loading.
+const NO_PROPOSALS: ListedProposal[] = [];
+
+// One suggestion. `focused` marks it for review keys; `register` hands the inbox its approve and
+// reject (with the card's current edits), so a key acts exactly as the buttons do.
+function ProposalCard({ proposal, where, styles, onDone, focused, register }: { proposal: ListedProposal; where: Where; styles: Styles; onDone(): void; focused: boolean; register(id: string, actions: CardActions | null): void }) {
   const approve = useRpc(approveProposalRpc);
   const reject = useRpc(rejectProposalRpc);
   const [subject, setSubject] = useState(proposal.subject);
@@ -35,8 +43,26 @@ function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedPro
   const editedPaths = paths.split(",").map((glob) => glob.trim()).filter((glob) => glob !== "");
   const action = useMutation({ mutationFn: (run: () => Promise<unknown>) => run(), onSuccess: onDone });
   const editable = proposal.kind !== "retire";
+  const view = useRef<View>(null);
+  const actions: CardActions = {
+    node: () => view.current,
+    approve: () =>
+      action.mutate(() =>
+        approve({
+          where,
+          id: proposal.id,
+          ...(editable && subject !== proposal.subject ? { subject } : {}),
+          ...(editable && body !== proposal.body ? { body } : {}),
+          ...(editable && editedPaths.join(",") !== proposal.paths.join(",") ? { paths: editedPaths } : {}),
+        }),
+      ),
+    reject: () => action.mutate(() => reject({ where, id: proposal.id })),
+  };
+  // Re-registered after every render, so a key always uses the latest edits.
+  useEffect(() => register(proposal.id, actions));
+  useEffect(() => () => register(proposal.id, null), [proposal.id, register]);
   return (
-    <View style={styles.card}>
+    <View ref={view} style={[styles.card, focused && { borderColor: styles.chipOn.borderColor, borderWidth: 2 }]} accessibilityState={{ selected: focused }}>
       <View style={styles.row}>
         <Text style={styles.body}>{KIND_LABEL[proposal.kind]}</Text>
         <Badge label={KIND[proposal.type]} styles={styles} />
@@ -61,30 +87,17 @@ function ProposalCard({ proposal, where, styles, onDone }: { proposal: ListedPro
       ) : null}
       {action.error && <Text style={styles.danger}>{errorText(action.error)}</Text>}
       <View style={styles.row}>
-        <Button
-          label="Approve"
-          styles={styles}
-          onPress={() =>
-            action.mutate(() =>
-              approve({
-                where,
-                id: proposal.id,
-                ...(editable && subject !== proposal.subject ? { subject } : {}),
-                ...(editable && body !== proposal.body ? { body } : {}),
-                ...(editable && editedPaths.join(",") !== proposal.paths.join(",") ? { paths: editedPaths } : {}),
-              }),
-            )
-          }
-        />
-        <Button label="Reject" tone="danger" styles={styles} onPress={() => action.mutate(() => reject({ where, id: proposal.id }))} />
+        <Button label="Approve" styles={styles} onPress={actions.approve} />
+        <Button label="Reject" tone="danger" styles={styles} onPress={actions.reject} />
       </View>
     </View>
   );
 }
 
-// Proposed changes wait here; nothing reaches an agent until it is approved. `controls` false leaves
-// out capture status, project scans, and tidy, for lists of several repos' proposals.
-export function Inbox({ where, styles, onChanged, controls = true }: { where: Where; styles: Styles; onChanged(): void; controls?: boolean }) {
+// Suggestions wait here; nothing reaches an agent until it is approved. `controls` false leaves out
+// the session status, project files, and clean-up buttons, for lists of several projects'
+// suggestions. `keyboard` turns on review keys (web only); only one inbox on screen should have it.
+export function Inbox({ where, styles, onChanged, controls = true, keyboard = controls }: { where: Where; styles: Styles; onChanged(): void; controls?: boolean; keyboard?: boolean }) {
   const list = useRpc(listProposalsRpc);
   const tidy = useRpc(tidyMemoryRpc);
   const settings = useSettings(memorySettings);
@@ -109,6 +122,28 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
   // "Reject all" asks once, and then rejects exactly the suggestions shown when asked; the question
   // is dropped when the list changes.
   const [confirmAll, setConfirmAll] = useState<{ approved: boolean; ids: string[] } | null>(null);
+  const [focus, setFocus] = useState(0);
+  const cards = useRef(new Map<string, CardActions>());
+  const register = useCallback((id: string, actions: CardActions | null) => {
+    if (actions) cards.current.set(id, actions);
+    else cards.current.delete(id);
+  }, []);
+  const listed = query.data?.proposals ?? NO_PROPOSALS;
+  const focused = Math.min(focus, Math.max(listed.length - 1, 0));
+  useEffect(() => {
+    if (!keyboard) return;
+    return onKey((key) => {
+      const action = reviewAction(key);
+      if (!action || listed.length === 0) return false;
+      if (action === "next" || action === "previous") {
+        const next = moveFocus(focused, action, listed.length);
+        setFocus(next);
+        // Only a key move scrolls, so opening the list never jumps the page.
+        scrollIntoView(cards.current.get(listed[next].id)?.node());
+      } else cards.current.get(listed[focused].id)?.[action]();
+      return true;
+    });
+  }, [keyboard, listed, focused]);
   const shownIds = query.data?.proposals.map((proposal) => proposal.id).join(",") ?? "";
   useEffect(() => setConfirmAll(null), [shownIds]);
   // When a run finishes, its proposals and any memories it saved automatically are shown everywhere.
@@ -200,8 +235,9 @@ export function Inbox({ where, styles, onChanged, controls = true }: { where: Wh
           {message}
         </Text>
       ))}
-      {proposals.map((proposal) => (
-        <ProposalCard key={proposal.id} proposal={proposal} where={where} styles={styles} onDone={refresh} />
+      {keyboard && keyboardAvailable && proposals.length > 0 && <Text style={styles.muted}>Keys: j and k to move, a to approve, r to reject.</Text>}
+      {proposals.map((proposal, index) => (
+        <ProposalCard key={proposal.id} proposal={proposal} where={where} styles={styles} onDone={refresh} focused={keyboard && keyboardAvailable && index === focused} register={register} />
       ))}
     </View>
   );

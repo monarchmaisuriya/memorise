@@ -24,7 +24,9 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     registerUsageSource: () => undefined,
   } as unknown as PluginServerContext;
   const workspaces: { workspaceDirectory?: string; projectRootPath: string; projectKind?: string }[] = [];
-  const paseo = { agents: { ref: () => ({ respondToPermission }), list: async () => ({ entries: [] }) }, workspaces: {
+  // Rows appended to agents' chats, by agent id.
+  const appended: { agentId: string; row: Record<string, any> }[] = [];
+  const paseo = { agents: { ref: (agentId: string) => ({ respondToPermission, timeline: { append: async (row: Record<string, any>) => appended.push({ agentId, row }) } }), list: async () => ({ entries: [] }) }, workspaces: {
       // One workspace per page, so a lookup must follow the cursor.
       list: async ({ page }: { page?: { cursor?: string } } = {}) => {
         const at = Number(page?.cursor ?? 0);
@@ -36,6 +38,9 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     server,
     workspaces,
     respondToPermission,
+    appended,
+    agentCreated: (id: string, cwd: string) => (on.get("agent.created") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id, cwd, provider: "claude", workspaceId: "ws-1", parentAgentId: null, title: null } }, { paseo }),
+    turnEnded: (id: string, cwd: string, timeline: unknown[]) => (on.get("agent.turn_ended") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id, cwd, provider: "claude", workspaceId: "ws-1", parentAgentId: null, title: null }, turnId: null, outcome: "completed", timeline }, { paseo }),
     create: (config: Record<string, unknown>, env?: Record<string, string>) => (before.get("agent.create") as (input: unknown, context: unknown) => Promise<{ config: Record<string, any> }>)({ request: { config, ...(env ? { env } : {}) } }, { paseo }),
     call: (name: string, input: unknown) => (rpc.get(name) as (input: unknown, context: unknown) => Promise<any>)(input, { paseo }),
     workspaceCreated: (cwd: string) => (on.get("workspace.created") as (event: unknown, context: unknown) => Promise<void>)({ workspace: { id: "ws-1", projectId: "p-1", cwd, name: null, archivedAt: null } }, { paseo }),
@@ -404,6 +409,32 @@ describe("memorise server entry", () => {
     const blog = join(site, "blog");
     await mkdir(blog);
     expect((await fake.create({ provider: "claude", cwd: blog })).config.systemPrompt).toContain("deploy: Upload with rsync.");
+  });
+
+  it("shows each agent a receipt of the memories it was given, updated as it uses them", async () => {
+    const fake = start();
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    const where = { repoKey: "github.com/acme/api" };
+    for (const subject of ["one", "two"]) await fake.call("memory.save", { where, scope: "repo", type: "howto", subject, body: `${subject} body.` });
+    await fake.create({ provider: "claude", cwd });
+    // An agent Memorise did not prepare (another folder) gets no receipt.
+    await fake.agentCreated("agent-8", tempDir("plugin-plain-"));
+    await fake.agentCreated("agent-9", cwd);
+    expect(fake.appended).toEqual([{ agentId: "agent-9", row: { type: "plugin", id: "memorise-receipt", kind: "memorise-receipt", version: 1, data: { listed: 2, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 } } }]);
+    const read = { type: "tool_call", callId: "c1", name: "mcp__paseo-memorise__memory_read", detail: { type: "unknown" }, status: "completed", error: null };
+    await fake.turnEnded("agent-9", cwd, [read, { ...read, callId: "c2" }]);
+    await fake.turnEnded("agent-9", cwd, [{ type: "assistant_message", text: "done" }]);
+    expect(fake.appended).toHaveLength(2);
+    expect(fake.appended[1].row.data).toEqual({ listed: 2, opened: 2, searched: 0, saved: 0, archived: 0, other: 0 });
+  });
+
+  it("adds no receipt when the setting is off", async () => {
+    const fake = start({ ...defaults, showMemoryUse: false });
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    await fake.create({ provider: "claude", cwd });
+    await fake.agentCreated("agent-1", cwd);
+    await fake.turnEnded("agent-1", cwd, [{ type: "tool_call", callId: "c1", name: "memory_read", detail: {}, status: "completed", error: null }]);
+    expect(fake.appended).toEqual([]);
   });
 
   it("lists a folder memory meant for matching files once a matching file changed this week", async () => {

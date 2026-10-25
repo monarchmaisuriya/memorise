@@ -4,10 +4,11 @@ import { ManagerScreen } from "./client/manager-screen";
 import { memoryChanged } from "./client/memory-events";
 import { MemoryPanel } from "./client/memory-panel";
 import { ProposalsCard } from "./client/proposals-card";
+import { ReceiptCard } from "./client/receipt-card";
 import { parseRemember, REMEMBER_HINT } from "./client/remember";
 import { MemorySettingsScreen } from "./client/settings-screen";
 import { MemoriseSidebarItem } from "./client/sidebar-item";
-import { listMemoriesRpc, PROPOSALS_CARD_KIND, proposalsCardSchema, saveMemoryRpc } from "./shared/memory";
+import { listMemoriesRpc, PROPOSALS_CARD_KIND, proposalsCardSchema, RECEIPT_KIND, receiptSchema, saveMemoryRpc } from "./shared/memory";
 
 export default function contribute(client: PluginClientContext) {
   const openManager = (repoKey: string | null) => client.openScreen({ screenId: "manager", params: repoKey ? { repo: repoKey } : {} });
@@ -64,6 +65,7 @@ export default function contribute(client: PluginClientContext) {
       schema: proposalsCardSchema,
       Component: (props) => <ProposalsCard {...props} openPanel={(workspaceId) => client.openPanel("memory", { workspaceId })} />,
     }),
+    client.addTimelineRenderer({ kind: RECEIPT_KIND, version: 1, schema: receiptSchema, Component: ReceiptCard }),
   ];
   return () => {
     for (const remove of removers) remove();

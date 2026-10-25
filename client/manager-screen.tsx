@@ -261,7 +261,7 @@ function useAllFacts(repoKeys: readonly (string | null)[]) {
 // Every repo's waiting proposals in one place, and a tidy of every repo with memories.
 // One repo's proposals as a card: the header (repo and count) opens and closes it; open, it shows
 // the repo's inbox.
-function RepoProposalsCard({ repoKey, pending, open, onToggle, styles }: { repoKey: string; pending: number; open: boolean; onToggle(): void; styles: Styles }) {
+function RepoProposalsCard({ repoKey, pending, open, keyboard, onToggle, styles }: { repoKey: string; pending: number; open: boolean; keyboard: boolean; onToggle(): void; styles: Styles }) {
   return (
     <View style={styles.card}>
       <Pressable
@@ -281,7 +281,7 @@ function RepoProposalsCard({ repoKey, pending, open, onToggle, styles }: { repoK
         </View>
         <Text style={styles.muted}>{pending} to review</Text>
       </Pressable>
-      {open && <Inbox where={{ repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} />}
+      {open && <Inbox where={{ repoKey }} styles={styles} onChanged={() => memoryChanged()} controls={false} keyboard={keyboard} />}
     </View>
   );
 }
@@ -331,7 +331,8 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
         </Text>
       ))}
       {pending.map((repo) => (
-        <RepoProposalsCard key={repo.repoKey} repoKey={repo.repoKey} pending={repo.pending} open={open.has(repo.repoKey)} onToggle={() => toggle(repo.repoKey)} styles={styles} />
+        // Review keys go to the open card only while just one is open, so a key never acts on two.
+        <RepoProposalsCard key={repo.repoKey} repoKey={repo.repoKey} pending={repo.pending} open={open.has(repo.repoKey)} keyboard={open.size === 1} onToggle={() => toggle(repo.repoKey)} styles={styles} />
       ))}
     </View>
   );
@@ -424,6 +425,7 @@ export function ManagerScreen(props: PluginScreenProps) {
       <Text style={styles.title}>Memorise</Text>
       {repos.error && <Text style={styles.danger}>{errorText(repos.error)}</Text>}
       <Text style={styles.label}>Memories</Text>
+      {repos.isPending && <Text style={styles.muted}>Loading projects</Text>}
       {repoEntries.map((entry) => (
         <NavItem key={entry.id} label={entry.label} detail={entry.detail} on={view === entry.id} onPress={() => setView(entry.id)} styles={styles} />
       ))}

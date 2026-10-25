@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+import { resolve } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   approveProposalRpc,
@@ -21,6 +22,8 @@ import {
   pinMemoryRpc,
   previewMemoryRpc,
   proposalsSummaryRpc,
+  RECEIPT_KIND,
+  type Receipt,
   rejectProposalRpc,
   restoreMemoryRpc,
   retireMemoryRpc,
@@ -39,6 +42,7 @@ import { buildMemorySection, INDEX_MAX_BYTES, withMemorySection, withoutMemorySe
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { ProposalStore } from "./proposals";
+import { memoryToolUse, Receipts } from "./receipts";
 import type { PaseoApi } from "./paseo-types";
 import { supportedProvider } from "./providers";
 import { ProjectKeys } from "./project-keys";
@@ -66,6 +70,7 @@ interface Runtime {
   proposals: ProposalStore;
   repoPrefs: RepoPrefs;
   keys: ProjectKeys;
+  receipts: Receipts;
   capture: Capture;
   port: number;
   mcpProblem: string | null;
@@ -114,7 +119,8 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       expiryDays: async () => (await currentSettings()).expiryDays,
       includeGlobal: async (repoKey) => (await repoPrefs.get(repoKey)).includeGlobal,
     });
-    const base = { root, store, tokens, search, usage, proposals, repoPrefs, keys, capture, port: mcpPort };
+    const receipts = new Receipts(root);
+    const base = { root, store, tokens, search, usage, proposals, repoPrefs, keys, receipts, capture, port: mcpPort };
     try {
       const http = await mcp.listen(mcpPort);
       console.log(`[memorise] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
@@ -177,6 +183,16 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return rootsKnown;
   }
 
+  // How many memories the last agent prepared in each folder was given, for its receipt. The count
+  // depends only on the folder, so agents created together in one folder share it.
+  const listedByFolder = new Map<string, { count: number; at: number }>();
+  const RECEIPT_MATCH_MS = 60_000;
+  const appendReceipt = (paseo: PaseoApi, agentId: string, receipt: Receipt) =>
+    paseo.agents
+      .ref(agentId)
+      .timeline.append({ type: "plugin", id: RECEIPT_KIND, kind: RECEIPT_KIND, version: 1, data: receipt })
+      .catch((error: unknown) => console.error(`[memorise] could not show the memory receipt for agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`));
+
   server.before("agent.create", async ({ request }, { paseo }) => {
     const { config } = request;
     // Always drop what a parent agent passed down: a child may run in another repo.
@@ -199,6 +215,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       const prepared = await prepareMemory(config.cwd, values);
       if (prepared.off) return { ...request, config: stripped };
       const { repoKey, section } = prepared;
+      if (values.showMemoryUse) listedByFolder.set(resolve(config.cwd), { count: section.shownIds.length, at: Date.now() });
       await usage.record("shown", section.shownIds).catch((error: unknown) => console.error(`[memorise] usage log write failed: ${String(error)}`));
       const token = tokens.mint({ repoKey, cwd: config.cwd, provider });
       return {
@@ -250,9 +267,31 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     capture.onTurnStarted(agent.id);
   });
 
-  server.on("agent.turn_ended", async ({ agent }, { paseo }) => {
-    const { capture } = await runtime;
+  // A new agent's receipt: the memories it was given. Agents Memorise did not prepare get none.
+  server.on("agent.created", async ({ agent }, { paseo }) => {
+    const { capture, receipts } = await runtime;
+    capture.remember(paseo);
+    const listed = listedByFolder.get(resolve(agent.cwd));
+    if (!listed || Date.now() - listed.at > RECEIPT_MATCH_MS || capture.isWorker(agent.id, agent.cwd)) return;
+    if (!(await currentSettings()).showMemoryUse) return;
+    const receipt = await receipts.start(agent.id, listed.count).catch((error: unknown) => {
+      console.error(`[memorise] could not start the memory receipt for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (receipt) await appendReceipt(paseo, agent.id, receipt);
+  });
+
+  server.on("agent.turn_ended", async ({ agent, timeline }, { paseo }) => {
+    const { capture, receipts } = await runtime;
     await capture.onTurnEnded(agent, paseo);
+    // The receipt grows with the turn's memory tool calls; a turn without any leaves it as it is.
+    const use = memoryToolUse(timeline);
+    if (Object.values(use).every((n) => n === 0) || capture.isWorker(agent.id, agent.cwd) || !(await currentSettings()).showMemoryUse) return;
+    const receipt = await receipts.add(agent.id, use).catch((error: unknown) => {
+      console.error(`[memorise] could not update the memory receipt for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (receipt) await appendReceipt(paseo, agent.id, receipt);
   });
 
   // The panel names a workspace folder; the manager names a repo key, or null for global only.

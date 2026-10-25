@@ -1,4 +1,4 @@
-import type { Activation, MemoryType } from "../shared/memory";
+import type { Activation, MemoryType, Receipt } from "../shared/memory";
 
 // The words Memorise shows people, in one place. They name what the user gets, not how it works
 // (see docs/2026-10-25-0930_memorise-ux-copy_plan.md for the glossary). Stored values, RPCs, and
@@ -68,6 +68,18 @@ export function usageText({ shown, read, found }: { shown: number; read: number;
   if (parts.length === 0) return "Not used yet";
   const text = parts.join(", ");
   return `${text[0].toUpperCase()}${text.slice(1)}`;
+}
+
+// A receipt row in an agent's chat: what its prompt listed, and how it used the memory tools.
+export function receiptText({ listed, opened, searched, saved, archived, other }: Receipt): string {
+  const used = [
+    opened > 0 ? `opened ${opened}` : null,
+    searched > 0 ? `searched ${searched}` : null,
+    saved > 0 ? `saved ${saved}` : null,
+    archived > 0 ? `archived ${archived}` : null,
+    other > 0 ? `used the memory tools ${times(other)}` : null,
+  ].filter((part): part is string => part !== null);
+  return `${count(listed, "memory", "memories")} in this agent's prompt · ${used.length > 0 ? used.join(", ") : "not used yet"}`;
 }
 
 // A project's short name: a repo's last path segment, a folder's current name (its label) or the
