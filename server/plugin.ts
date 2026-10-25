@@ -50,6 +50,7 @@ import { RepoPrefs } from "./repo-prefs";
 import { SearchIndex } from "./search-index";
 import { assertNoSecret } from "./secrets";
 import { MemoryStore } from "./store";
+import { readTimelineSince, timelineEnd } from "./timeline";
 import { formatExport, importKey, parseImport } from "./transfer";
 import { UsageLog, usageOf } from "./usage";
 import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility";
@@ -274,20 +275,31 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const listed = listedByFolder.get(resolve(agent.cwd));
     if (!listed || Date.now() - listed.at > RECEIPT_MATCH_MS || capture.isWorker(agent.id, agent.cwd)) return;
     if (!(await currentSettings()).showMemoryUse) return;
-    const receipt = await receipts.start(agent.id, listed.count).catch((error: unknown) => {
-      console.error(`[memorise] could not start the memory receipt for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    });
+    // Counting starts where the timeline ends now, so nothing before the agent existed is its use.
+    const receipt = await timelineEnd(paseo, agent.id)
+      .then((cursor) => receipts.start(agent.id, listed.count, cursor))
+      .catch((error: unknown) => {
+        console.error(`[memorise] could not start the memory receipt for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      });
     if (receipt) await appendReceipt(paseo, agent.id, receipt);
   });
 
-  server.on("agent.turn_ended", async ({ agent, timeline }, { paseo }) => {
+  server.on("agent.turn_ended", async ({ agent }, { paseo }) => {
     const { capture, receipts } = await runtime;
     await capture.onTurnEnded(agent, paseo);
-    // The receipt grows with the turn's memory tool calls; a turn without any leaves it as it is.
-    const use = memoryToolUse(timeline);
-    if (Object.values(use).every((n) => n === 0) || capture.isWorker(agent.id, agent.cwd) || !(await currentSettings()).showMemoryUse) return;
-    const receipt = await receipts.add(agent.id, use).catch((error: unknown) => {
+    if (capture.isWorker(agent.id, agent.cwd) || !(await currentSettings()).showMemoryUse) return;
+    // Paseo's event carries no timeline, so the receipt reads the entries after the position it
+    // counted up to. A rebuilt timeline moves the position without counting, so no call counts twice.
+    const receipt = await (async () => {
+      const previous = await receipts.cursor(agent.id);
+      if (previous === null) return null;
+      const fresh = await readTimelineSince(paseo, agent.id, previous);
+      if (previous && !fresh.continued) console.log(`[memorise] the timeline of agent ${agent.id} was rebuilt; its receipt continues from the new end without counting this turn`);
+      const use = previous && !fresh.continued ? memoryToolUse([]) : memoryToolUse(fresh.entries.map((entry) => entry.item));
+      const updated = await receipts.add(agent.id, use, { epoch: fresh.epoch, seq: fresh.end });
+      return Object.values(use).some((n) => n > 0) ? updated : null;
+    })().catch((error: unknown) => {
       console.error(`[memorise] could not update the memory receipt for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     });
