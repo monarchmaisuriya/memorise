@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.7.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.8.0
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -72,7 +72,8 @@ Only agents created after the install get memory. Agents already running keep th
   - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving Memorise.
 - **Work inside a workspace:** the Memorise workspace panel lists the project's memories and the global ones, with the same card and editor, and "Open in manager".
 - **See what agents see:** the panel's **What agents see** tab shows exactly what a new agent started in that workspace would see, why each memory is listed (pinned, about files this workspace changed, global, or this project), and how much prompt space (lines and KB) it uses.
-- **Review suggestions:** approve or reject them straight from the "memories suggested" card in the agent's chat, or edit them first in the Suggestions tab of the panel or Memorise.
+- **Review suggestions:** approve or reject them straight from the "memories suggested" card in the agent's chat, or edit them first in the Suggestions tab of the panel or Memorise. On desktop and in the browser, keys work there too: **j** and **k** (or the arrow keys) move between suggestions, **a** approves, and **r** rejects; keys typed into a field are left alone. In the cross-project Suggestions view, keys act on the open card while just one is open.
+- **See memory use in chats:** each agent's chat gets one quiet line, such as "Memorise · 12 memories in this agent's prompt · opened 2, searched 1", that updates as the agent uses the memory tools. The model never sees it. Turn it off with "Show memory use in agent chats" in Settings.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
 ### Words Memorise uses
@@ -126,9 +127,10 @@ Settings > Plugins > Memorise, or **Settings** in Memorise. The main level holds
 | --- | --- | --- |
 | Give agents memory | on | Off keeps saved memories |
 | Read memories without asking | on | Saving or changing a memory still asks, unless the agent runs in a mode that skips approvals |
+| Show memory use in agent chats | on | One line per agent: memories in its prompt, and how it used them |
 | Suggest memories from sessions | off | See below |
 | Provider that reads sessions | Same as the session | So no transcript leaves the provider that ran it |
-| Clean up each project weekly | off | Clean-ups can also be started by hand |
+| Clean up each project weekly | off | Checked when the plugin starts and hourly after; clean-ups can also be started by hand |
 | Suggest from project files automatically | off | Once per project, or once then check weekly; see below |
 | Advanced: Clean-up and project files provider | Claude | |
 | Advanced: Memories in each new agent's prompt | 150 | 0 lists none (agents still get the tools); up to 400. The list is also capped at 8 KB |

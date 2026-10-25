@@ -4,6 +4,18 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-25
+
+### Added
+
+- A memory receipt in each agent's chat: one quiet line, "Memorise · 12 memories in this agent's prompt · opened 2, searched 1", that updates as the agent uses the memory tools. It is never sent to the model. "Show memory use in agent chats" in Settings (on by default) turns it off.
+- Review keys for suggestions on desktop and in the browser: j and k (or the arrows) move, a approves, r rejects, with the focused suggestion outlined and scrolled into view. Keys typed into a field, or held with Cmd, Ctrl, or Alt, are ignored.
+
+### Changed
+
+- The weekly clean-up also checks when the plugin first sees Paseo, so reloading the plugin no longer pushes it back an hour.
+- The navigation says "Loading projects" while the project list loads.
+
 ## [0.7.0] - 2026-10-25
 
 ### Changed
@@ -164,7 +176,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.0
 [0.7.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.7.0
 [0.6.2]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.2
 [0.6.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.1
