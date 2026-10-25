@@ -12,6 +12,7 @@ import type { NewProposal, ProposalStore } from "./proposals";
 import { type Provider, supportedProvider } from "./providers";
 import type { RepoPrefs } from "./repo-prefs";
 import type { MemoryStore } from "./store";
+import { readTimelineSince } from "./timeline";
 import { sliceTranscript } from "./transcript";
 import { usageOf, type UsageLog } from "./usage";
 import { isVisibleToAgents } from "./visibility";
@@ -20,9 +21,6 @@ import { openRepoCheckouts } from "./workspaces";
 
 const MINUTE_MS = 60_000;
 const WORKER_TIMEOUT_MS = 5 * MINUTE_MS;
-const TIMELINE_PAGE = 200;
-// At most this many timeline pages are read forward per capture; the transcript keeps the newest.
-const MAX_TIMELINE_PAGES = 5;
 const TIDY_INTERVAL_MS = 7 * 24 * 60 * MINUTE_MS;
 const PROJECT_SCAN_INTERVAL_MS = 7 * 24 * 60 * MINUTE_MS;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -133,27 +131,6 @@ export class Capture {
       const cutoff = Date.now() - CURSOR_KEEP_MS;
       for (const [id, entry] of Object.entries(state.agents)) if (entry.at && Date.parse(entry.at) < cutoff) delete state.agents[id];
     });
-  }
-
-  // Timeline entries after the saved cursor, paging forward. A rebuilt timeline (new epoch, or a
-  // cursor Paseo no longer knows) starts again from the most recent page.
-  private async newEntries(paseo: PaseoApi, agentId: string, previous: { epoch: string; seq: number } | undefined) {
-    const timeline = paseo.agents.ref(agentId).timeline;
-    if (previous) {
-      const entries = [];
-      let cursor = { epoch: previous.epoch, seq: previous.seq };
-      for (let pageNumber = 0; pageNumber < MAX_TIMELINE_PAGES; pageNumber += 1) {
-        const page = await timeline.refetch({ direction: "after", cursor, limit: TIMELINE_PAGE, projection: "projected" });
-        if (page.epoch !== previous.epoch || page.reset || page.staleCursor) break;
-        entries.push(...page.entries.filter((entry) => entry.seqEnd > cursor.seq));
-        const end = page.entries.at(-1)?.seqEnd;
-        if (!page.hasNewer || end === undefined) return { epoch: page.epoch, entries, end: end ?? cursor.seq };
-        cursor = { epoch: page.epoch, seq: end };
-      }
-      if (entries.length > 0) return { epoch: previous.epoch, entries, end: cursor.seq };
-    }
-    const tail = await timeline.refetch({ direction: "tail", limit: TIMELINE_PAGE, projection: "projected" });
-    return { epoch: tail.epoch, entries: tail.entries, end: tail.entries.at(-1)?.seqEnd ?? 0 };
   }
 
   private serializeState<T>(operation: (state: CaptureState) => Promise<T> | T): Promise<T> {
@@ -352,7 +329,7 @@ export class Capture {
       // Captured memories belong to a repo; global memories come only from the user.
       if (!repoKey || !(await this.captureOn(values, repoKey))) return 0;
       const previous = (await this.readState()).agents[agent.id];
-      const fresh = await this.newEntries(paseo, agent.id, previous);
+      const fresh = await readTimelineSince(paseo, agent.id, previous);
       const cursor = { epoch: fresh.epoch, seq: fresh.end };
       const slice = sliceTranscript(fresh.entries.map((entry) => entry.item));
       // Too little new conversation yet: the cursor stays, so later turns add up until there is enough.

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { type MemoryUse, memoryUseSchema, type Receipt, receiptSchema } from "../shared/memory";
 import type { AgentTimelineItem } from "./paseo-types";
+import type { TimelineCursor } from "./timeline";
 
 const KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 const NO_USE: MemoryUse = { opened: 0, searched: 0, saved: 0, archived: 0, other: 0 };
@@ -28,7 +29,8 @@ export function memoryToolUse(items: readonly AgentTimelineItem[]): MemoryUse {
   return use;
 }
 
-const entrySchema = receiptSchema.extend({ at: z.string() });
+// `cursor` is the timeline position counted up to; receipts saved before it existed have none.
+const entrySchema = receiptSchema.extend({ at: z.string(), cursor: z.object({ epoch: z.string(), seq: z.number().int().nonnegative() }).optional() });
 const fileSchema = z.object({ version: z.literal(1), agents: z.record(z.string(), entrySchema) });
 type Entry = z.infer<typeof entrySchema>;
 
@@ -42,33 +44,46 @@ export class Receipts {
     this.file = join(root, "receipts.json");
   }
 
-  async start(agentId: string, listed: number): Promise<Receipt> {
+  async start(agentId: string, listed: number, cursor: TimelineCursor): Promise<Receipt> {
     const started = await this.change((agents) => {
-      agents[agentId] = { listed, ...NO_USE, at: new Date().toISOString() };
+      agents[agentId] = { listed, ...NO_USE, at: new Date().toISOString(), cursor };
       return agents[agentId];
     });
     if (!started) throw new Error(`The receipt for agent ${agentId} was not saved`);
     return started;
   }
 
-  // Adds a turn's use to an agent's totals; null for an agent that has no receipt.
-  add(agentId: string, use: MemoryUse): Promise<Receipt | null> {
+  // Where an agent's counting stopped: null for an agent that has no receipt, undefined for a receipt
+  // saved before positions were kept.
+  async cursor(agentId: string): Promise<TimelineCursor | undefined | null> {
+    await this.queue;
+    const agents = await this.read();
+    return agentId in agents ? agents[agentId].cursor : null;
+  }
+
+  // Adds a turn's use to an agent's totals and saves the position counted up to, in one write; null
+  // for an agent that has no receipt.
+  add(agentId: string, use: MemoryUse, cursor: TimelineCursor): Promise<Receipt | null> {
     return this.change((agents) => {
       const entry = agents[agentId];
       if (!entry) return null;
       const next = memoryUseSchema.parse(Object.fromEntries(Object.keys(NO_USE).map((key) => [key, entry[key as keyof MemoryUse] + use[key as keyof MemoryUse]])));
-      agents[agentId] = { listed: entry.listed, ...next, at: new Date().toISOString() };
+      agents[agentId] = { listed: entry.listed, ...next, at: new Date().toISOString(), cursor };
       return agents[agentId];
     });
   }
 
+  private async read(): Promise<Record<string, Entry>> {
+    const text = await readFile(this.file, "utf8").catch((error: unknown) => {
+      if (Reflect.get(Object(error), "code") === "ENOENT") return null;
+      throw error;
+    });
+    return text === null ? {} : fileSchema.parse(JSON.parse(text)).agents;
+  }
+
   private change<T extends Entry | null>(edit: (agents: Record<string, Entry>) => T): Promise<Receipt | null> {
     const next = this.queue.then(async () => {
-      const text = await readFile(this.file, "utf8").catch((error: unknown) => {
-        if (Reflect.get(Object(error), "code") === "ENOENT") return null;
-        throw error;
-      });
-      const agents = text === null ? {} : fileSchema.parse(JSON.parse(text)).agents;
+      const agents = await this.read();
       const cutoff = Date.now() - KEEP_MS;
       for (const [id, entry] of Object.entries(agents)) if (Date.parse(entry.at) < cutoff) delete agents[id];
       const result = edit(agents);
@@ -77,7 +92,7 @@ export class Receipts {
       await writeFile(temporary, `${JSON.stringify({ version: 1, agents }, null, 2)}\n`, { mode: 0o600 });
       await rename(temporary, this.file);
       if (!result) return null;
-      const { at: _at, ...receipt } = result;
+      const { at: _at, cursor: _cursor, ...receipt } = result;
       return receipt;
     });
     this.queue = next.catch(() => undefined);

@@ -29,13 +29,15 @@ describe("memory tool use in a turn", () => {
 });
 
 describe("receipts store", () => {
-  it("keeps each agent's listed count and running totals across restarts", async () => {
+  it("keeps each agent's listed count, running totals, and counted-up-to position across restarts", async () => {
     const root = tempDir("receipts-");
     const receipts = new Receipts(root);
-    expect(await receipts.start("agent-1", 12)).toEqual({ listed: 12, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 });
-    await receipts.add("agent-1", { opened: 2, searched: 1, saved: 0, archived: 0, other: 0 });
-    expect(await new Receipts(root).add("agent-1", { opened: 1, searched: 0, saved: 1, archived: 0, other: 0 })).toEqual({ listed: 12, opened: 3, searched: 1, saved: 1, archived: 0, other: 0 });
-    expect(await receipts.add("unknown-agent", { opened: 1, searched: 0, saved: 0, archived: 0, other: 0 })).toBeNull();
+    expect(await receipts.start("agent-1", 12, { epoch: "e1", seq: 3 })).toEqual({ listed: 12, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 });
+    await receipts.add("agent-1", { opened: 2, searched: 1, saved: 0, archived: 0, other: 0 }, { epoch: "e1", seq: 9 });
+    expect(await new Receipts(root).add("agent-1", { opened: 1, searched: 0, saved: 1, archived: 0, other: 0 }, { epoch: "e1", seq: 14 })).toEqual({ listed: 12, opened: 3, searched: 1, saved: 1, archived: 0, other: 0 });
+    expect(await new Receipts(root).cursor("agent-1")).toEqual({ epoch: "e1", seq: 14 });
+    expect(await receipts.cursor("unknown-agent")).toBeNull();
+    expect(await receipts.add("unknown-agent", { opened: 1, searched: 0, saved: 0, archived: 0, other: 0 }, { epoch: "e1", seq: 1 })).toBeNull();
     const saved = JSON.parse(await readFile(join(root, "receipts.json"), "utf8"));
     expect(Object.keys(saved.agents)).toEqual(["agent-1"]);
   });

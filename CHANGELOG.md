@@ -4,6 +4,16 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-25
+
+### Fixed
+
+- Memory receipts now count. Paseo's turn-end event no longer carries the turn's timeline, so receipts always read "not used yet". A receipt now reads the agent's timeline after the position it counted up to, saves that position with its totals, and never counts a call twice.
+
+### Changed
+
+- The suggestions card in an agent's chat is one line per suggestion: its title with small Approve and Reject actions; tapping the title shows its text. A small muted header holds the count and "Edit in Memorise".
+
 ## [0.8.0] - 2026-10-25
 
 ### Added
@@ -176,7 +186,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.1
 [0.8.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.0
 [0.7.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.7.0
 [0.6.2]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.6.2

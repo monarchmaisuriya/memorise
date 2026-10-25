@@ -26,7 +26,16 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
   const workspaces: { workspaceDirectory?: string; projectRootPath: string; projectKind?: string }[] = [];
   // Rows appended to agents' chats, by agent id.
   const appended: { agentId: string; row: Record<string, any> }[] = [];
-  const paseo = { agents: { ref: (agentId: string) => ({ respondToPermission, timeline: { append: async (row: Record<string, any>) => appended.push({ agentId, row }) } }), list: async () => ({ entries: [] }) }, workspaces: {
+  // Each agent's timeline, served only through refetch, as Paseo does: "after" a cursor, or the
+  // most recent page for "tail".
+  const timelines = new Map<string, unknown[]>();
+  const refetch = (agentId: string) => async (options: { direction?: string; cursor?: { seq: number }; limit?: number } = {}) => {
+    const all = (timelines.get(agentId) ?? []).map((item, i) => ({ item, seqStart: i + 1, seqEnd: i + 1 }));
+    const limit = options.limit ?? 200;
+    const page = options.direction === "after" && options.cursor ? all.filter((entry) => entry.seqEnd > (options.cursor?.seq ?? 0)).slice(0, limit) : all.slice(-limit);
+    return { epoch: "e1", entries: page, hasNewer: false, reset: false, staleCursor: false };
+  };
+  const paseo = { agents: { ref: (agentId: string) => ({ respondToPermission, timeline: { refetch: refetch(agentId), append: async (row: Record<string, any>) => appended.push({ agentId, row }) } }), list: async () => ({ entries: [] }) }, workspaces: {
       // One workspace per page, so a lookup must follow the cursor.
       list: async ({ page }: { page?: { cursor?: string } } = {}) => {
         const at = Number(page?.cursor ?? 0);
@@ -40,7 +49,12 @@ function fakeServer(values: MemorySettings, readSettings?: () => Promise<unknown
     respondToPermission,
     appended,
     agentCreated: (id: string, cwd: string) => (on.get("agent.created") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id, cwd, provider: "claude", workspaceId: "ws-1", parentAgentId: null, title: null } }, { paseo }),
-    turnEnded: (id: string, cwd: string, timeline: unknown[]) => (on.get("agent.turn_ended") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id, cwd, provider: "claude", workspaceId: "ws-1", parentAgentId: null, title: null }, turnId: null, outcome: "completed", timeline }, { paseo }),
+    // Items join the agent's timeline; the event itself carries an empty timeline, as Paseo's does.
+    addToTimeline: (id: string, items: unknown[]) => timelines.set(id, [...(timelines.get(id) ?? []), ...items]),
+    turnEnded: (id: string, cwd: string, items: unknown[]) => {
+      timelines.set(id, [...(timelines.get(id) ?? []), ...items]);
+      return (on.get("agent.turn_ended") as (event: unknown, context: unknown) => Promise<void>)({ agent: { id, cwd, provider: "claude", workspaceId: "ws-1", parentAgentId: null, title: null }, turnId: null, outcome: { kind: "completed" }, timeline: [] }, { paseo });
+    },
     create: (config: Record<string, unknown>, env?: Record<string, string>) => (before.get("agent.create") as (input: unknown, context: unknown) => Promise<{ config: Record<string, any> }>)({ request: { config, ...(env ? { env } : {}) } }, { paseo }),
     call: (name: string, input: unknown) => (rpc.get(name) as (input: unknown, context: unknown) => Promise<any>)(input, { paseo }),
     workspaceCreated: (cwd: string) => (on.get("workspace.created") as (event: unknown, context: unknown) => Promise<void>)({ workspace: { id: "ws-1", projectId: "p-1", cwd, name: null, archivedAt: null } }, { paseo }),
@@ -419,9 +433,11 @@ describe("memorise server entry", () => {
     await fake.create({ provider: "claude", cwd });
     // An agent Memorise did not prepare (another folder) gets no receipt.
     await fake.agentCreated("agent-8", tempDir("plugin-plain-"));
+    const read = { type: "tool_call", callId: "c1", name: "mcp__paseo-memorise__memory_read", detail: { type: "unknown" }, status: "completed", error: null };
+    // What is in the timeline before the agent is created is not its use.
+    fake.addToTimeline("agent-9", [{ ...read, callId: "c0" }]);
     await fake.agentCreated("agent-9", cwd);
     expect(fake.appended).toEqual([{ agentId: "agent-9", row: { type: "plugin", id: "memorise-receipt", kind: "memorise-receipt", version: 1, data: { listed: 2, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 } } }]);
-    const read = { type: "tool_call", callId: "c1", name: "mcp__paseo-memorise__memory_read", detail: { type: "unknown" }, status: "completed", error: null };
     await fake.turnEnded("agent-9", cwd, [read, { ...read, callId: "c2" }]);
     await fake.turnEnded("agent-9", cwd, [{ type: "assistant_message", text: "done" }]);
     expect(fake.appended).toHaveLength(2);

@@ -1,5 +1,6 @@
 import { type PluginTimelineItemProps, useAgent, useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, type proposalsCardSchema, rejectProposalRpc } from "../shared/memory";
@@ -9,12 +10,36 @@ import { errorText } from "./copy";
 type CardData = z.infer<typeof proposalsCardSchema>;
 type Theme = PluginTimelineItemProps<CardData>["theme"];
 
-function action(theme: Theme, primary: boolean) {
-  return { alignSelf: "flex-start" as const, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: primary ? theme.colors.accent : theme.colors.surface2 };
+// A small text action; the padding keeps it easy to tap.
+function TextAction({ label, accessibilityLabel, color, onPress }: { label: string; accessibilityLabel: string; color: string; onPress(): void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={onPress} hitSlop={6} style={{ paddingHorizontal: 4, paddingVertical: 4 }}>
+      <Text style={{ color, fontSize: 13 }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// One suggestion on one line: its title, then Approve and Reject. Tapping the title shows its text.
+function Suggestion({ subject, body, theme, onDecide }: { subject: string; body: string; theme: Theme; onDecide(approved: boolean): void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ gap: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={open ? `Hide the text of ${subject}` : `Show the text of ${subject}`} onPress={() => setOpen((value) => !value)} style={{ flexShrink: 1, flexGrow: 1 }}>
+          <Text style={{ color: theme.colors.foreground, fontSize: 13 }} numberOfLines={open ? undefined : 1}>
+            {subject}
+          </Text>
+        </Pressable>
+        <TextAction label="Approve" accessibilityLabel={`Approve ${subject}`} color={theme.colors.accent} onPress={() => onDecide(true)} />
+        <TextAction label="Reject" accessibilityLabel={`Reject ${subject}`} color={theme.colors.foregroundMuted} onPress={() => onDecide(false)} />
+      </View>
+      {open && <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>{body}</Text>}
+    </View>
+  );
 }
 
 // This session's proposals that are still waiting, each with Approve and Reject.
-function Pending({ agentId, workspaceId, theme, openPanel }: { agentId: string; workspaceId: string; theme: Theme; openPanel(workspaceId: string): void }) {
+function Pending({ agentId, workspaceId, theme }: { agentId: string; workspaceId: string; theme: Theme }) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);
   const list = useRpc(listProposalsRpc);
   const approve = useRpc(approveProposalRpc);
@@ -37,27 +62,12 @@ function Pending({ agentId, workspaceId, theme, openPanel }: { agentId: string; 
   if (query.error) return <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{errorText(query.error)}</Text>;
   const mine = query.data.proposals.filter((proposal) => proposal.source.agentId === agentId);
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 4 }}>
       {mine.length === 0 && <Text style={muted}>All reviewed.</Text>}
       {mine.map((proposal) => (
-        <View key={proposal.id} style={{ gap: 4 }}>
-          <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>
-            {proposal.subject}: {proposal.body}
-          </Text>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Approve ${proposal.subject}`} onPress={() => decide.mutate({ id: proposal.id, approved: true })} style={action(theme, true)}>
-              <Text style={{ color: theme.colors.accentForeground, fontSize: 13 }}>Approve</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Reject ${proposal.subject}`} onPress={() => decide.mutate({ id: proposal.id, approved: false })} style={action(theme, false)}>
-              <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Reject</Text>
-            </Pressable>
-          </View>
-        </View>
+        <Suggestion key={proposal.id} subject={proposal.subject} body={proposal.body} theme={theme} onDecide={(approved) => decide.mutate({ id: proposal.id, approved })} />
       ))}
       {decide.error && <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{errorText(decide.error)}</Text>}
-      <Pressable accessibilityRole="button" accessibilityLabel="Edit suggestions in the Memorise panel" onPress={() => openPanel(workspaceId)} style={action(theme, false)}>
-        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>Edit in the Memorise panel</Text>
-      </Pressable>
     </View>
   );
 }
@@ -67,18 +77,15 @@ export function ProposalsCard({ agentId, item, theme, openPanel }: PluginTimelin
   const { count, autoSaved } = item.data;
   const workspaceId = useAgent(agentId, (agent) => agent.workspaceId);
   return (
-    <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, padding: 10, gap: 6, backgroundColor: theme.colors.surface1 }}>
-      <Text style={{ color: theme.colors.foreground, fontSize: 14 }}>
-        {[
-          count > 0 ? `${count === 1 ? "1 memory" : `${count} memories`} suggested from this session. Nothing reaches agents until you approve it` : null,
-          autoSaved > 0 ? `${autoSaved === 1 ? "1 memory" : `${autoSaved} memories`} saved without review (this project saves suggestions without review)` : null,
-        ]
-          .filter(Boolean)
-          .join(". ")}
-        .
-      </Text>
+    <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, gap: 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, flexShrink: 1, flexGrow: 1 }}>
+          {[count > 0 ? `${count === 1 ? "1 suggested memory" : `${count} suggested memories`} · agents see them once approved` : null, autoSaved > 0 ? `${autoSaved} saved without review` : null].filter(Boolean).join(" · ")}
+        </Text>
+        {workspaceId && <TextAction label="Edit in Memorise" accessibilityLabel="Edit suggestions in the Memorise panel" color={theme.colors.foregroundMuted} onPress={() => openPanel(workspaceId)} />}
+      </View>
       {workspaceId ? (
-        <Pending agentId={agentId} workspaceId={workspaceId} theme={theme} openPanel={openPanel} />
+        <Pending agentId={agentId} workspaceId={workspaceId} theme={theme} />
       ) : (
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in Memorise, under Suggestions.</Text>
       )}
