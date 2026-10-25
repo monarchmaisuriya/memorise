@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVATION, count, errorText, KIND, projectDetail, projectName, providerName, relativeDate, shortDate, usageText } from "./copy";
+import { ACTIVATION, count, errorText, KIND, projectDetail, projectName, providerName, receiptText, relativeDate, shortDate, usageText } from "./copy";
 
 // An RPC error as Paseo's client builds it: the handler's text, then requestType= and code=.
 function rpcError(text: string, requestType: string, code: string): Error {
@@ -52,6 +52,14 @@ describe("usage", () => {
     expect(usageText({ shown: 0, read: 0, found: 0 })).toBe("Not used yet");
     expect(usageText({ shown: 3, read: 1, found: 0 })).toBe("Shown to agents 3 times, opened once");
     expect(usageText({ shown: 0, read: 0, found: 2 })).toBe("Found by search 2 times");
+  });
+});
+
+describe("memory receipts", () => {
+  it("says how many memories an agent was given, and how it used them", () => {
+    expect(receiptText({ listed: 12, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 })).toBe("12 memories in this agent's prompt · not used yet");
+    expect(receiptText({ listed: 1, opened: 2, searched: 1, saved: 1, archived: 0, other: 0 })).toBe("1 memory in this agent's prompt · opened 2, searched 1, saved 1");
+    expect(receiptText({ listed: 0, opened: 0, searched: 0, saved: 0, archived: 1, other: 2 })).toBe("0 memories in this agent's prompt · archived 1, used the memory tools 2 times");
   });
 });
 

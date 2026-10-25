@@ -362,6 +362,21 @@ export const PROPOSALS_CARD_KIND = "memorise-proposals";
 // count: proposals waiting; autoSaved: memories saved automatically (auto-approve on).
 export const proposalsCardSchema = z.object({ count: z.number().int().min(0), autoSaved: z.number().int().min(0).default(0) });
 
+// One row per agent in its chat: how many memories its prompt listed, and how it used the memory
+// tools so far. The row is replaced as the totals grow.
+export const RECEIPT_KIND = "memorise-receipt";
+export const memoryUseSchema = z.object({
+  opened: z.number().int().min(0),
+  searched: z.number().int().min(0),
+  saved: z.number().int().min(0),
+  archived: z.number().int().min(0),
+  // Calls that name only the memory server, as some providers report them.
+  other: z.number().int().min(0),
+});
+export type MemoryUse = z.infer<typeof memoryUseSchema>;
+export const receiptSchema = memoryUseSchema.extend({ listed: z.number().int().min(0) });
+export type Receipt = z.infer<typeof receiptSchema>;
+
 // Repos with proposals waiting, for the manager's Proposals view.
 export const proposalsSummaryRpc = defineRpc({
   name: "memory.proposals.summary",
@@ -408,6 +423,8 @@ export const memorySettings = defineSettings({
     tidyProvider: providerSchema.default("claude"),
     tidyModel: z.string().trim().max(100).default(""),
     tidyWeekly: z.boolean().default(false),
+    // A row in each agent's chat saying how many memories it was given and how it used them.
+    showMemoryUse: z.boolean().default(true),
     // Project scans started by the plugin for every project with an open workspace: never, once per
     // project, or once and then a re-check each week.
     projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),
