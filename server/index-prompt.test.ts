@@ -38,6 +38,19 @@ function fact(overrides: Partial<FactListItem> = {}): FactListItem {
 
 const base = { repoKey: "github.com/acme/api", notes: new Map<string, string>(), maxLines: 150, toolsAvailable: true, problems: [] };
 
+describe("the prompt list with the longest memories", () => {
+  it("shows an excerpt of each memory and keeps the list within its fixed size", () => {
+    const long = Array.from({ length: 150 }, (_, i) => fact({ subject: `long ${i}`, body: "x".repeat(10_000) }));
+    const { text, shownIds } = buildMemorySection({ ...base, facts: long });
+    const first = text.split("\n").find((line) => line.includes("long 0:"));
+    expect(first).toMatch(/: x+… \(codex, /);
+    expect(first?.length).toBeLessThan(400);
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(shownIds.length).toBeLessThan(150);
+    expect(text).toContain("more not shown here; find them with memory_search.");
+  });
+});
+
 describe("memory section", () => {
   it("is added once even when a parent prompt already carries one", () => {
     const parent = withMemorySection("Be brief.", buildMemorySection({ ...base, facts: [fact()] }).text);

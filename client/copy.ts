@@ -101,13 +101,13 @@ const number = (n: number) => n.toLocaleString("en-US");
 
 // The count under a text field: characters left, or how many too many. A title's count shows only
 // past three quarters of its limit; a memory's always shows, with a note on cost once it is longer
-// than the default limit, since agents receive the whole text each time they open it.
+// than the default limit, since agents receive the whole text each time they open or find it.
 export function lengthNote(length: number, limit: number, field: "title" | "body"): { text: string; tone: "muted" | "danger" } | null {
   const chars = (n: number) => `${number(n)} ${n === 1 ? "character" : "characters"}`;
   if (length > limit) return { text: `${chars(length - limit)} too many`, tone: "danger" };
   if (field === "title" && length < limit * 0.75) return null;
   const left = `${chars(limit - length)} left`;
-  return { text: field === "body" && length > DEFAULT_BODY_CHARS ? `${left}. Long memories use more context each time an agent opens them.` : left, tone: "muted" };
+  return { text: field === "body" && length > DEFAULT_BODY_CHARS ? `${left}. Long memories use more context each time an agent opens or finds them.` : left, tone: "muted" };
 }
 
 // The names the app shows for fields that validation can refuse.

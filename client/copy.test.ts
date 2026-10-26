@@ -102,7 +102,7 @@ describe("glossary", () => {
 describe("length notes", () => {
   it("counts down to the limit, warns about long memories, and says how many are too many", () => {
     expect(lengthNote(12, 1_000, "body")).toEqual({ text: "988 characters left", tone: "muted" });
-    expect(lengthNote(1_500, 5_000, "body")).toEqual({ text: "3,500 characters left. Long memories use more context each time an agent opens them.", tone: "muted" });
+    expect(lengthNote(1_500, 5_000, "body")).toEqual({ text: "3,500 characters left. Long memories use more context each time an agent opens or finds them.", tone: "muted" });
     expect(lengthNote(1_234, 1_000, "body")).toEqual({ text: "234 characters too many", tone: "danger" });
     expect(lengthNote(999, 1_000, "body")).toEqual({ text: "1 character left", tone: "muted" });
   });
