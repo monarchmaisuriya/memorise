@@ -4,6 +4,17 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-26
+
+### Added
+
+- "Longest memory (characters)" in Settings, under Advanced: from 200 to 10,000, default 1,000. It applies to every save: the app, `/remember`, agents, approved suggestions, and imports (which skip longer entries by name). Its description says what longer memories cost: prompts list only the first 160 characters, but agents receive the whole text each time they open or search one, and clean-ups read every memory in full. Lowering it keeps longer memories; only new text must fit.
+- A live character count under the memory editor's text ("988 characters left", "234 characters too many") and, near its limit, under the title. Past 1,000 characters it notes that long memories use more context each time an agent opens them. Save stays off while the text is too long.
+
+### Fixed
+
+- Validation errors read as sentences that name the field ("Memory must be 1,000 characters or less", "Enter a title") instead of a raw JSON list, on every screen. An out-of-range advanced setting names the setting and its range.
+
 ## [0.8.1] - 2026-10-25
 
 ### Fixed
@@ -186,7 +197,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.9.0
 [0.8.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.1
 [0.8.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.0
 [0.7.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.7.0
