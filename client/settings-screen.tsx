@@ -14,7 +14,7 @@ const ADVANCED_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: str
   {
     key: "memoryMaxChars",
     label: "Longest memory (characters)",
-    hint: "Default 1,000, from 200 to 10,000. Prompts list only each memory's first 160 characters, but agents receive the whole text each time they open or search one, and clean-ups read every memory in full, so longer memories use more context and tokens.",
+    hint: "Default 1,000, from 200 to 10,000. The memory list in each agent's prompt shows only a short excerpt and has a fixed size, so it doesn't grow. But agents get the full text of every memory they open or find in a search, and clean-ups read every memory in full, so longer memories use more context and tokens.",
   },
   { key: "indexMaxLines", label: "Memories in each new agent's prompt", hint: "Default 150, up to 400. 0 lists none; agents can still search." },
   { key: "expiryDays", label: "Hide unused agent memories after (days)", hint: "Default 60. 0 never hides them. Memories you saved are never hidden." },

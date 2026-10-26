@@ -37,7 +37,7 @@ Paseo clones the repository and runs the manifest's `build` command, `npm ci --o
 To install a specific release instead of the latest commit, name its tag:
 
 ```bash
-paseo plugin add git:monarchmaisuriya/memorise --ref v0.9.0
+paseo plugin add git:monarchmaisuriya/memorise --ref v0.9.1
 ```
 
 Move an existing install to another release with `paseo plugin update memorise --ref <tag>`. Releases and their changes are listed in [CHANGELOG.md](CHANGELOG.md).
@@ -104,7 +104,7 @@ Set in the editor; agents can never change these.
 | On for agents | on (default) / off | Off hides it from agents' lists, search, and reading without deleting it |
 | Expires on | a date, or empty (default) | After that day (UTC) agents no longer see it; Memorise shows it as expired |
 
-A pinned memory is always listed in full. Editing the title, text, kind, or files saves a new version (kept in History); changing when agents see it does not.
+A pinned memory is always listed, first, with the start of its text (never title only). Editing the title, text, kind, or files saves a new version (kept in History); changing when agents see it does not.
 
 ### Project settings
 
@@ -133,7 +133,7 @@ Settings > Plugins > Memorise, or **Settings** in Memorise. The main level holds
 | Clean up each project weekly | off | Checked when the plugin starts and hourly after; clean-ups can also be started by hand |
 | Suggest from project files automatically | off | Once per project, or once then check weekly; see below |
 | Advanced: Clean-up and project files provider | Claude | |
-| Advanced: Longest memory (characters) | 1,000 | 200 to 10,000; applies to every save (the app, `/remember`, agents, approved suggestions, imports). Prompts list only each memory's first 160 characters, but opening, searching, and clean-ups use the whole text, so longer memories use more context and tokens. Lowering it keeps longer memories; only new text must fit |
+| Advanced: Longest memory (characters) | 1,000 | 200 to 10,000; applies to every save (the app, `/remember`, agents, approved suggestions, imports). The list in each agent's prompt shows only a short excerpt of each memory and has a fixed size, so it doesn't grow; but agents get the full text of every memory they open or find in a search, and clean-ups read every memory in full, so longer memories use more context and tokens. Lowering it keeps longer memories; only new text must fit |
 | Advanced: Memories in each new agent's prompt | 150 | 0 lists none (agents still get the tools); up to 400. The list is also capped at 8 KB |
 | Advanced: Hide unused agent memories after (days) | 60 | 0 never hides them. Memories you saved or pinned are never hidden |
 | Advanced: Wait after a session goes quiet (minutes) | 20 | 5 to 240; a new message restarts the wait |

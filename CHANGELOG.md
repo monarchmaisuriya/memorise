@@ -4,6 +4,13 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-26
+
+### Fixed
+
+- The "Longest memory" description no longer suggests that each memory adds 160 characters to every prompt. It now says the list in each agent's prompt shows a short excerpt and has a fixed size, so it doesn't grow, and that agents get the full text of every memory they open or find in a search. The editor's note past 1,000 characters says "each time an agent opens or finds them".
+- The README no longer says a pinned memory is listed in full; it is listed first with the start of its text, never as title only.
+
 ## [0.9.0] - 2026-10-26
 
 ### Added
@@ -197,7 +204,8 @@ First release.
 - Install straight from Git: `paseo plugin add git:monarchmaisuriya/memorise`.
 - The Memorise icon.
 
-[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/monarchmaisuriya/memorise/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.9.1
 [0.9.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.9.0
 [0.8.1]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.1
 [0.8.0]: https://github.com/monarchmaisuriya/memorise/releases/tag/v0.8.0
