@@ -3,13 +3,19 @@ import { SettingsAction, SettingsCard, SettingsInput, SettingsSection, SettingsS
 import { useState } from "react";
 import { Text } from "react-native";
 import { type MemorySettings, memorySettings, PROVIDERS } from "../shared/memory";
+import { errorText } from "./copy";
 
-type NumberKey = "indexMaxLines" | "expiryDays" | "mcpPort" | "captureIdleMinutes" | "captureMinUserMessages" | "captureMaxPerDay";
+type NumberKey = "memoryMaxChars" | "indexMaxLines" | "expiryDays" | "mcpPort" | "captureIdleMinutes" | "captureMinUserMessages" | "captureMaxPerDay";
 type TextKey = "captureModel" | "captureInstructions" | "captureExclusions" | "tidyModel";
 type DraftKey = NumberKey | TextKey;
 
 // Main level: what most people change. Advanced: limits, timing, models, and the tools port.
 const ADVANCED_NUMBERS: ReadonlyArray<{ key: NumberKey; label: string; hint: string }> = [
+  {
+    key: "memoryMaxChars",
+    label: "Longest memory (characters)",
+    hint: "Default 1,000, from 200 to 10,000. Prompts list only each memory's first 160 characters, but agents receive the whole text each time they open or search one, and clean-ups read every memory in full, so longer memories use more context and tokens.",
+  },
   { key: "indexMaxLines", label: "Memories in each new agent's prompt", hint: "Default 150, up to 400. 0 lists none; agents can still search." },
   { key: "expiryDays", label: "Hide unused agent memories after (days)", hint: "Default 60. 0 never hides them. Memories you saved are never hidden." },
   { key: "captureIdleMinutes", label: "Wait after a session goes quiet (minutes)", hint: "Default 20, from 5 to 240. A new message restarts the wait." },
@@ -59,6 +65,12 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
     for (const { key } of ADVANCED_TEXTS) {
       const draft = drafts[key];
       if (draft !== undefined) next[key] = draft;
+    }
+    // A number out of range is named with its label here, rather than refused later as raw validation output.
+    const checked = memorySettings.schema.safeParse(next);
+    if (!checked.success) {
+      setInputError(errorText(checked.error, Object.fromEntries([...ADVANCED_NUMBERS, ...ADVANCED_TEXTS].map(({ key, label }) => [key, `“${label}”`]))));
+      return;
     }
     setInputError(null);
     void settings.save(next, settings.revision).then((saved) => saved && setDrafts({}));
@@ -145,7 +157,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
           />
         </SettingsCard>
       </SettingsSection>
-      <SettingsSection title="Advanced" info="Prompt size, hiding unused memories, timing and limits for background runs, models, guidance, and the tools port.">
+      <SettingsSection title="Advanced" info="Memory length, prompt size, hiding unused memories, timing and limits for background runs, models, guidance, and the tools port.">
         <SettingsCard>
           <SettingsSelect
             label="Clean-up and project files provider"

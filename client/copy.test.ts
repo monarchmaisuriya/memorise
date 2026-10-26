@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVATION, count, errorText, KIND, projectDetail, projectName, providerName, receiptText, relativeDate, shortDate, usageText } from "./copy";
+import { ACTIVATION, count, errorText, KIND, lengthNote, projectDetail, projectName, providerName, receiptText, relativeDate, shortDate, usageText } from "./copy";
 
 // An RPC error as Paseo's client builds it: the handler's text, then requestType= and code=.
 function rpcError(text: string, requestType: string, code: string): Error {
@@ -16,6 +16,18 @@ describe("error text", () => {
     expect(errorText(rpcError("Request failed: timed out", "plugin.rpc.invoke.request", "timeout"))).toBe("Request failed: timed out");
     expect(errorText(new Error("Disk full requestType=x"))).toBe("Disk full requestType=x");
     expect(errorText("plain text")).toBe("plain text");
+  });
+
+  it("turns validation issues into sentences that name the field, never JSON", () => {
+    const issues = [
+      { origin: "string", code: "too_big", maximum: 1000, inclusive: true, path: ["body"], message: "Too big: expected string to have <=1000 characters" },
+      { origin: "string", code: "too_small", minimum: 1, inclusive: true, path: ["subject"], message: "Too small: expected string to have >=1 characters" },
+      { code: "custom", path: ["body"], message: "A memory cannot contain a <memorise> tag" },
+      { code: "invalid_format", format: "date", path: ["until"], message: "Invalid ISO date" },
+    ];
+    const zodError = Object.assign(new Error(JSON.stringify(issues, null, 2)), { name: "ZodError", issues });
+    expect(errorText(zodError)).toBe("Memory must be 1,000 characters or less. Enter a title. Memory: A memory cannot contain a <memorise> tag. Expires on must be a date like 2026-12-31.");
+    expect(errorText(rpcError(`Request failed: ${JSON.stringify(issues.slice(0, 1))}`, "plugin.rpc.invoke.request", "handler_error"))).toBe("Memory must be 1,000 characters or less.");
   });
 });
 
@@ -84,5 +96,20 @@ describe("glossary", () => {
       title: "Title only",
       manual: "Only when searched",
     });
+  });
+});
+
+describe("length notes", () => {
+  it("counts down to the limit, warns about long memories, and says how many are too many", () => {
+    expect(lengthNote(12, 1_000, "body")).toEqual({ text: "988 characters left", tone: "muted" });
+    expect(lengthNote(1_500, 5_000, "body")).toEqual({ text: "3,500 characters left. Long memories use more context each time an agent opens them.", tone: "muted" });
+    expect(lengthNote(1_234, 1_000, "body")).toEqual({ text: "234 characters too many", tone: "danger" });
+    expect(lengthNote(999, 1_000, "body")).toEqual({ text: "1 character left", tone: "muted" });
+  });
+
+  it("shows a title count only near its limit", () => {
+    expect(lengthNote(30, 80, "title")).toBeNull();
+    expect(lengthNote(70, 80, "title")).toEqual({ text: "10 characters left", tone: "muted" });
+    expect(lengthNote(81, 80, "title")).toEqual({ text: "1 character too many", tone: "danger" });
   });
 });

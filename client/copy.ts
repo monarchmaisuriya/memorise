@@ -1,4 +1,4 @@
-import type { Activation, MemoryType, Receipt } from "../shared/memory";
+import { type Activation, DEFAULT_BODY_CHARS, type MemoryType, type Receipt } from "../shared/memory";
 
 // The words Memorise shows people, in one place. They name what the user gets, not how it works
 // (see docs/2026-10-25-0930_memorise-ux-copy_plan.md for the glossary). Stored values, RPCs, and
@@ -97,15 +97,63 @@ export function projectDetail(repoKey: string | null): string {
   return repoKey ?? "For every project";
 }
 
+const number = (n: number) => n.toLocaleString("en-US");
+
+// The count under a text field: characters left, or how many too many. A title's count shows only
+// past three quarters of its limit; a memory's always shows, with a note on cost once it is longer
+// than the default limit, since agents receive the whole text each time they open it.
+export function lengthNote(length: number, limit: number, field: "title" | "body"): { text: string; tone: "muted" | "danger" } | null {
+  const chars = (n: number) => `${number(n)} ${n === 1 ? "character" : "characters"}`;
+  if (length > limit) return { text: `${chars(length - limit)} too many`, tone: "danger" };
+  if (field === "title" && length < limit * 0.75) return null;
+  const left = `${chars(limit - length)} left`;
+  return { text: field === "body" && length > DEFAULT_BODY_CHARS ? `${left}. Long memories use more context each time an agent opens them.` : left, tone: "muted" };
+}
+
+// The names the app shows for fields that validation can refuse.
+const FIELD_LABEL: Record<string, string> = { subject: "Title", body: "Memory", type: "Kind", paths: "About files", until: "Expires on", query: "Search" };
+
+type Issue = { code?: unknown; path?: unknown; message?: unknown; maximum?: unknown; minimum?: unknown; origin?: unknown; format?: unknown };
+
+// One validation issue as a sentence that names the field, in the form "Memory must be 1,000
+// characters or less", never as the validator's own codes.
+function issueText(issue: Issue, labels: Record<string, string>): string {
+  const key = Array.isArray(issue.path) ? issue.path.filter((part) => typeof part === "string").join(".") : "";
+  const label = labels[key] ?? (key || "This value");
+  if (issue.code === "too_big" && issue.origin === "string" && typeof issue.maximum === "number") return `${label} must be ${number(issue.maximum)} characters or less`;
+  if (issue.code === "too_big" && typeof issue.maximum === "number") return `${label} must be ${number(issue.maximum)} or less`;
+  if (issue.code === "too_small" && issue.origin === "string" && issue.minimum === 1) return `Enter ${label === "Memory" ? "the memory" : `a ${label.toLowerCase()}`}`;
+  if (issue.code === "too_small" && typeof issue.minimum === "number") return `${label} must be at least ${number(issue.minimum)}`;
+  if (issue.code === "invalid_format" && issue.format === "date") return `${label} must be a date like 2026-12-31`;
+  return `${label}: ${typeof issue.message === "string" ? issue.message : "not accepted"}`;
+}
+
+// Validation issues from a Zod error, or from a message that is the JSON list of them (as a refused
+// RPC input arrives); null for any other error.
+function validationIssues(error: Error, message: string): Issue[] | null {
+  const own = (error as Error & { issues?: unknown }).issues;
+  if (Array.isArray(own)) return own as Issue[];
+  if (!message.trimStart().startsWith("[")) return null;
+  try {
+    const parsed: unknown = JSON.parse(message);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "object" && item !== null && "code" in item) ? (parsed as Issue[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 // An error's own message. Paseo's client appends " requestType=<type> code=<code>" to every RPC
 // error, and a handler's error also gets "Request failed: " in front; only that exact wrapping,
-// named by the error's own fields, is removed. Any other error is shown as it is.
-export function errorText(error: unknown): string {
+// named by the error's own fields, is removed. Validation issues become sentences naming the field
+// (`labels` adds names for other screens' fields). Any other error is shown as it is.
+export function errorText(error: unknown, labels: Record<string, string> = {}): string {
   if (!(error instanceof Error)) return String(error);
   const { requestType, code } = error as Error & { requestType?: unknown; code?: unknown };
   let message = error.message;
   if (typeof code === "string" && message.endsWith(` code=${code}`)) message = message.slice(0, -` code=${code}`.length);
   if (typeof requestType === "string" && message.endsWith(` requestType=${requestType}`)) message = message.slice(0, -` requestType=${requestType}`.length);
   if (code === "handler_error" && message.startsWith("Request failed: ")) message = message.slice("Request failed: ".length);
+  const issues = validationIssues(error, message);
+  if (issues) return issues.map((issue) => `${issueText(issue, { ...FIELD_LABEL, ...labels })}.`).join(" ");
   return message;
 }

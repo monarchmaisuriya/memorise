@@ -1,4 +1,4 @@
-import { MAX_BODY_CHARS, MAX_SUBJECT_CHARS, type MemoryType, memoryTypeSchema, type Scope } from "../shared/memory";
+import { MAX_SUBJECT_CHARS, type MemoryType, memoryTypeSchema, type Scope } from "../shared/memory";
 
 export interface RememberRequest {
   scope: Scope;
@@ -26,7 +26,6 @@ export function parseRemember(args: string): RememberRequest {
   }
   const body = rest.trim();
   if (body === "") throw new Error(`Write the fact after /remember, like: /remember ${REMEMBER_HINT}`);
-  if (body.length > MAX_BODY_CHARS) throw new Error(`A memory holds one fact of at most ${MAX_BODY_CHARS} characters; this one has ${body.length}`);
   const firstLine = body.split("\n")[0];
   const subject = firstLine.length > MAX_SUBJECT_CHARS ? `${firstLine.slice(0, MAX_SUBJECT_CHARS - 1)}…` : firstLine;
   return { scope, type, subject, body };
