@@ -364,6 +364,18 @@ describe("memorise server entry", () => {
     expect(again.skipped.map((entry: { reason: string }) => entry.reason)).toEqual(["already saved", "already saved"]);
   });
 
+  it("applies the memory length setting to saves and skips longer entries in an import", async () => {
+    const fake = start();
+    const api = { repoKey: "github.com/acme/api" };
+    await expect(fake.call("memory.save", { where: api, scope: "repo", type: "howto", subject: "long", body: "x".repeat(1_200) })).rejects.toThrow("Memory must be 1,000 characters or less; this one has 1,200");
+    const text = JSON.stringify([{ type: "howto", subject: "short", body: "Run make." }, { type: "howto", subject: "long", body: "x".repeat(1_200) }]);
+    const dry = await fake.call("memory.import", { where: api, scope: "repo", text, dryRun: true });
+    expect(dry.added.map((entry: { subject: string }) => entry.subject)).toEqual(["short"]);
+    expect(dry.skipped).toEqual([{ line: "long", reason: "longer than 1,000 characters" }]);
+    const roomy = start({ ...defaults, memoryMaxChars: 5_000 });
+    expect((await roomy.call("memory.save", { where: api, scope: "repo", type: "howto", subject: "long", body: "x".repeat(1_200) })).fact.body).toHaveLength(1_200);
+  });
+
   it("lists, approves, and rejects a repo's proposals by repo key, and starts a tidy by repo key", async () => {
     const fake = start();
     const repo = { repoKey: "github.com/acme/api" };

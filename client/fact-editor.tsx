@@ -1,9 +1,9 @@
-import { useRpc } from "@getpaseo/plugin/client";
+import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Pressable, Switch, Text, TextInput, View } from "react-native";
-import { type Activation, activationSchema, type Fact, type MemoryType, memoryTypeSchema, saveMemoryRpc, type Scope, updateMemoryRpc, type Where } from "../shared/memory";
-import { ACTIVATION, KIND } from "./copy";
+import { type Activation, activationSchema, DEFAULT_BODY_CHARS, type Fact, MAX_SUBJECT_CHARS, type MemoryType, memorySettings, memoryTypeSchema, saveMemoryRpc, type Scope, updateMemoryRpc, type Where } from "../shared/memory";
+import { ACTIVATION, KIND, lengthNote } from "./copy";
 import { memoryChanged } from "./memory-events";
 import { Chip, type Styles } from "./panel-ui";
 import { errorText } from "./copy";
@@ -14,6 +14,9 @@ const splitPaths = (text: string) => text.split(",").map((glob) => glob.trim()).
 export function FactEditor({ where, fact, defaultScope, hasRepo, styles, onDone }: { where: Where; fact?: Fact; defaultScope: Scope; hasRepo: boolean; styles: Styles; onDone(): void }) {
   const save = useRpc(saveMemoryRpc);
   const update = useRpc(updateMemoryRpc);
+  const settings = useSettings(memorySettings);
+  // The daemon checks the same limit on save; this only shows it while typing.
+  const maxBody = settings.status === "ready" ? settings.values.memoryMaxChars : DEFAULT_BODY_CHARS;
   const [subject, setSubject] = useState(fact?.subject ?? "");
   const [body, setBody] = useState(fact?.body ?? "");
   const [type, setType] = useState<MemoryType>(fact?.type ?? "reference");
@@ -38,13 +41,20 @@ export function FactEditor({ where, fact, defaultScope, hasRepo, styles, onDone 
       onDone();
     },
   });
+  const titleNote = lengthNote(subject.trim().length, MAX_SUBJECT_CHARS, "title");
+  // An unchanged memory longer than a lowered limit can still be saved; only new text must fit.
+  const bodyNote = body.trim() === fact?.body ? null : lengthNote(body.trim().length, maxBody, "body");
+  const tooLong = titleNote?.tone === "danger" || bodyNote?.tone === "danger";
+  const noteStyle = (note: { tone: "muted" | "danger" }) => (note.tone === "danger" ? styles.danger : styles.muted);
   return (
     <View style={styles.card}>
       <Text style={styles.body}>{fact ? "Edit memory" : "New memory"}</Text>
       <Text style={styles.muted}>Title</Text>
-      <TextInput accessibilityLabel="Title" value={subject} onChangeText={setSubject} placeholderTextColor={styles.muted.color} placeholder="A few words, such as “Run tests with Docker”" style={[styles.input, { minHeight: 0 }]} />
+      <TextInput accessibilityLabel="Title" value={subject} onChangeText={setSubject} placeholderTextColor={styles.muted.color} placeholder="A few words, such as “Run tests with Docker”" style={[styles.input, { minHeight: 0 }, titleNote?.tone === "danger" && { borderColor: styles.danger.color }]} />
+      {titleNote && <Text style={noteStyle(titleNote)}>{titleNote.text}</Text>}
       <Text style={styles.muted}>Memory</Text>
-      <TextInput accessibilityLabel="Memory" multiline value={body} onChangeText={setBody} placeholderTextColor={styles.muted.color} placeholder="One fact agents should know. No secrets." style={styles.input} />
+      <TextInput accessibilityLabel="Memory" multiline value={body} onChangeText={setBody} placeholderTextColor={styles.muted.color} placeholder="One fact agents should know. No secrets." style={[styles.input, bodyNote?.tone === "danger" && { borderColor: styles.danger.color }]} />
+      {bodyNote && <Text style={noteStyle(bodyNote)}>{bodyNote.text}</Text>}
       <Text style={styles.muted}>Kind</Text>
       <View style={styles.row}>
         {memoryTypeSchema.options.map((option) => (
@@ -93,7 +103,7 @@ export function FactEditor({ where, fact, defaultScope, hasRepo, styles, onDone 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={fact ? "Save changes" : "Save memory"}
-          disabled={subject.trim() === "" || body.trim() === "" || mutation.isPending}
+          disabled={subject.trim() === "" || body.trim() === "" || tooLong || mutation.isPending}
           onPress={() => mutation.mutate()}
           style={styles.primary}
         >

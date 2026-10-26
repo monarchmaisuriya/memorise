@@ -178,4 +178,21 @@ describe("MemoryStore", () => {
     ]);
     expect(summaries[1].lastModified).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  it("refuses a memory longer than the limit, naming the limit and the length", async () => {
+    await expect(store.create(repoFact("x".repeat(1_001)))).rejects.toThrow("Memory must be 1,000 characters or less; this one has 1,001");
+    const roomy = new MemoryStore(tempDir("memorise-"), () => 5_000);
+    expect((await roomy.create(repoFact("x".repeat(1_001)))).body).toHaveLength(1_001);
+  });
+
+  it("keeps a long memory usable after the limit is lowered, checking only new text", async () => {
+    let limit = 5_000;
+    const shrinking = new MemoryStore(tempDir("memorise-"), () => limit);
+    const long = await shrinking.create(repoFact("x".repeat(3_000)));
+    limit = 1_000;
+    const retitled = await shrinking.supersede(long.id, REPO, { subject: "renamed" });
+    expect(retitled.body).toHaveLength(3_000);
+    await expect(shrinking.supersede(retitled.id, REPO, { body: "y".repeat(2_000) })).rejects.toThrow("Memory must be 1,000 characters or less; this one has 2,000");
+    expect((await shrinking.retire(retitled.id, REPO)).status).toBe("retired");
+  });
 });

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "yaml";
-import { type Fact, type FactListItem, factIdSchema, factSchema, repoKeySchema, type Scope } from "../shared/memory";
+import { bodyLengthProblem, DEFAULT_BODY_CHARS, type Fact, type FactListItem, factIdSchema, factSchema, repoKeySchema, type Scope } from "../shared/memory";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -40,7 +40,16 @@ export function parseFact(text: string): Fact {
 export class MemoryStore {
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(readonly root: string) {}
+  // The user's limit on a memory's text, read at each save so a settings change applies at once.
+  constructor(
+    readonly root: string,
+    private readonly maxBodyChars: () => number | Promise<number> = () => DEFAULT_BODY_CHARS,
+  ) {}
+
+  private async checkBody(body: string): Promise<void> {
+    const problem = bodyLengthProblem(body, await this.maxBodyChars());
+    if (problem) throw new Error(problem);
+  }
 
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.queue.then(operation, operation);
@@ -102,7 +111,8 @@ export class MemoryStore {
   }
 
   create(input: NewFact): Promise<Fact> {
-    return this.serialize(() => {
+    return this.serialize(async () => {
+      await this.checkBody(input.body);
       const now = new Date().toISOString();
       return this.save(factSchema.parse({ ...input, id: newFactId(), status: "active", created: now, modified: now, lastUsed: now }));
     });
@@ -114,6 +124,8 @@ export class MemoryStore {
       const old = await this.get(id, repoKey);
       if (old.superseded) throw new Error(`Memory ${id} was already replaced by a newer version; update that one instead`);
       if (old.status === "retired") throw new Error(`Memory ${id} is retired`);
+      // Only new text is checked, so an older memory longer than a lowered limit can still be edited otherwise.
+      if (change.body !== undefined && change.body.trim() !== old.body) await this.checkBody(change.body);
       const now = new Date().toISOString();
       const { superseded: _superseded, ...base } = old;
       return this.save(factSchema.parse({ ...base, ...change, id: newFactId(), supersedes: old.id, status: "active", created: now, modified: now, lastUsed: now }));

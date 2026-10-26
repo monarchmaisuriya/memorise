@@ -2,7 +2,11 @@ import { defineRpc, defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
 
 export const MAX_SUBJECT_CHARS = 80;
-export const MAX_BODY_CHARS = 1_000;
+// The longest memory the format allows. The user's limit (the memoryMaxChars setting, 1,000 by
+// default) is checked when text is saved, so lowering it never makes stored memories unreadable.
+export const MAX_BODY_CHARS = 10_000;
+export const DEFAULT_BODY_CHARS = 1_000;
+export const MIN_BODY_CHARS = 200;
 export const MAX_CITATIONS = 10;
 
 // Saved text is later placed inside the <memorise> section of other agents' system prompts. It
@@ -20,6 +24,14 @@ export const subjectSchema = z
   .refine(noMemoryTag, TAG_MESSAGE);
 
 export const bodySchema = z.string().trim().min(1).max(MAX_BODY_CHARS).refine(noMemoryTag, TAG_MESSAGE);
+
+const formatCount = (n: number) => n.toLocaleString("en-US");
+
+// Why a memory's text cannot be saved under the user's limit, or null when it fits.
+export function bodyLengthProblem(body: string, limit: number): string | null {
+  const length = body.trim().length;
+  return length > limit ? `Memory must be ${formatCount(limit)} characters or less; this one has ${formatCount(length)}` : null;
+}
 
 export const memoryTypeSchema = z.enum(["preference", "decision", "gotcha", "howto", "reference"]);
 export type MemoryType = z.infer<typeof memoryTypeSchema>;
@@ -406,6 +418,8 @@ export const memorySettings = defineSettings({
     enabled: z.boolean().default(true),
     autoApproveReads: z.boolean().default(true),
     indexMaxLines: z.number().int().min(0).max(400).default(150),
+    // The longest memory that can be saved; 0 is not allowed, so it can never mean "no limit".
+    memoryMaxChars: z.number().int().min(MIN_BODY_CHARS).max(MAX_BODY_CHARS).default(DEFAULT_BODY_CHARS),
     expiryDays: z.number().int().min(0).max(3650).default(60),
     mcpPort: z.number().int().min(1024).max(65535).default(6790),
     // Capture: propose memories from finished sessions. Off until the user turns it on.

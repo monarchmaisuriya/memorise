@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   approveProposalRpc,
+  bodyLengthProblem,
   type BulkAction,
   getRepoPrefsRpc,
   bulkMemoryRpc,
@@ -90,7 +91,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
 
   const runtime: Promise<Runtime> = (async () => {
     const root = await resolveRoot();
-    const store = new MemoryStore(root);
+    const store = new MemoryStore(root, async () => (await currentSettings()).memoryMaxChars);
     const tokens = new TokenAuthority(await loadTokenSecret(root));
     // Search is one feature; a SQLite failure must not take the whole plugin down with it.
     let search: SearchIndex | null = null;
@@ -384,8 +385,14 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const saved = new Set((await store.list(repoKey)).filter((fact) => fact.scope === scope && !fact.superseded).map((fact) => importKey(fact.subject, fact.body)));
     const seen = new Set<string>();
     const added: { type: MemoryType; subject: string }[] = [];
+    const limit = (await currentSettings()).memoryMaxChars;
     for (const entry of entries) {
       const key = importKey(entry.subject, entry.body);
+      // Checked here as well as in the store, so the preview names them and an import never stops halfway.
+      if (bodyLengthProblem(entry.body, limit)) {
+        skipped.push({ line: entry.subject, reason: `longer than ${limit.toLocaleString("en-US")} characters` });
+        continue;
+      }
       if (saved.has(key) || seen.has(key)) {
         skipped.push({ line: entry.subject, reason: saved.has(key) ? "already saved" : "repeated in this import" });
         continue;
