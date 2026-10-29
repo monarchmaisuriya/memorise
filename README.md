@@ -20,7 +20,7 @@ The plugin's id in Paseo is `memorise`.
 
 ## Requirements
 
-- Paseo `>=0.12.0 <0.14.0` (tested with 0.12.0 on macOS).
+- Paseo 0.12.0 or later (tested with 0.12.0 and 0.14.0 on macOS).
 - git and npm on the daemon host.
 - At least one of the Claude, Codex, or OpenCode providers set up in Paseo.
 
