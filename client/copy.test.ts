@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVATION, count, errorText, KIND, lengthNote, projectDetail, projectName, providerName, receiptText, relativeDate, shortDate, usageText } from "./copy";
+import { ACTIVATION, count, errorText, KIND, lengthNote, projectDetail, pluginName, projectName, providerName, receiptText, relativeDate, shortDate, usageText } from "./copy";
 
 // An RPC error as Paseo's client builds it: the handler's text, then requestType= and code=.
 function rpcError(text: string, requestType: string, code: string): Error {
@@ -56,6 +56,7 @@ describe("dates and counts", () => {
 describe("providers", () => {
   it("writes provider ids as people write them", () => {
     expect([providerName("claude"), providerName("codex"), providerName("opencode"), providerName("other"), providerName(null)]).toEqual(["Claude", "Codex", "OpenCode", "other", "an agent"]);
+    expect([pluginName("contextualise"), pluginName("my-plugin")]).toEqual(["Contextualise", "My Plugin"]);
   });
 });
 
