@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-29
+
+### Fixed
+
+- Paseo 0.14 refused to load the plugin, because it allowed only Paseo below 0.14.0. It now needs Paseo 0.12.0 or later, with no upper limit; 0.14 made no plugin changes it depends on.
+
 ## [0.10.0] - 2026-10-29
 
 ### Added
