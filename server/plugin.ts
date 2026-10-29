@@ -58,6 +58,7 @@ import { isVisibleToAgents, orderForAgents, rankWithReasons } from "./visibility
 import { PathMatcher, recentFiles, workFiles } from "./work-files";
 import { markProjectRoots, openRepoCheckouts } from "./workspaces";
 import { isWorkerRequest } from "./workers";
+import { Interop } from "./interop";
 
 const CITATION_BUDGET_MS = 1_000;
 const PATH_MATCH_BUDGET_MS = 500;
@@ -74,6 +75,7 @@ interface Runtime {
   keys: ProjectKeys;
   receipts: Receipts;
   capture: Capture;
+  stopInterop: () => void;
   port: number;
   mcpProblem: string | null;
   http: Server | null;
@@ -110,6 +112,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const capture = new Capture({ root, store, proposals, usage, repoPrefs, keys, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
     capture.startProjectScans();
+    const stopInterop = new Interop({ root, store, proposals }).start();
     const { mcpPort } = await currentSettings();
     const mcp = new MemoryMcp({
       store,
@@ -122,7 +125,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       includeGlobal: async (repoKey) => (await repoPrefs.get(repoKey)).includeGlobal,
     });
     const receipts = new Receipts(root);
-    const base = { root, store, tokens, search, usage, proposals, repoPrefs, keys, receipts, capture, port: mcpPort };
+    const base = { root, store, tokens, search, usage, proposals, repoPrefs, keys, receipts, capture, stopInterop, port: mcpPort };
     try {
       const http = await mcp.listen(mcpPort);
       console.log(`[memorise] store ${root}; MCP on 127.0.0.1:${mcpPort}`);
@@ -539,6 +542,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const resolved = await runtime.catch(() => null);
     if (!resolved) return;
     resolved.capture.stop();
+    resolved.stopInterop();
     resolved.search?.close();
     const { http } = resolved;
     if (!http) return;

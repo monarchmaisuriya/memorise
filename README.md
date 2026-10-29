@@ -213,6 +213,10 @@ Workers run in the plugin's empty worker folder, inside one hidden Paseo workspa
 - Saved text is always shown to agents as quoted notes, marked as notes to verify rather than instructions. It cannot add lines to the list or end it.
 - The files belong to your user account, so any program running as you, including an agent with shell access, could edit them directly.
 
+## Other plugins
+
+Paseo plugins cannot call each other, so Memorise publishes a heartbeat and each project's memory list (without memory text) as files, and reads suggestions from an inbox. Another plugin, such as [Contextualise](https://github.com/monarchmaisuriya/contextualise), can use them to show related memories and to suggest replacing or archiving a memory whose code changed. Such suggestions always wait for you in Suggestions, labelled with the plugin's name. The contract is in [INTEROP.md](INTEROP.md).
+
 ## Limits
 
 - Memory text is sent to each agent's model provider as part of its prompt.

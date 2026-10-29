@@ -8,7 +8,7 @@ import { onMemoryChanged } from "./memory-events";
 import { Badge, Button, type Styles } from "./panel-ui";
 import { moveFocus, reviewAction } from "./review-keys";
 import { keyboardAvailable, onKey, scrollIntoView } from "./web";
-import { count, errorText, KIND, projectName, providerName, relativeDate } from "./copy";
+import { count, errorText, KIND, pluginName, projectName, providerName, relativeDate } from "./copy";
 
 type ListedProposal = z.infer<typeof listProposalsRpc.output>["proposals"][number];
 
@@ -23,6 +23,8 @@ const TARGET_VERB: Record<ListedProposal["kind"], string> = { new: "", replace: 
 
 // Where a suggestion came from, so it can be judged: its source, who wrote it, and when.
 function sourceText(proposal: ListedProposal): string {
+  // Another plugin is its own author, so no provider is named.
+  if (proposal.source.from === "plugin") return `Suggested by ${pluginName(proposal.source.plugin ?? proposal.source.provider)} · ${relativeDate(proposal.created)}`;
   const from = proposal.source.from === "capture" ? "Suggested from a session" : proposal.source.from === "project" ? "Suggested from project files" : "Suggested by a clean-up";
   return `${from} · ${providerName(proposal.source.provider)} · ${relativeDate(proposal.created)}`;
 }

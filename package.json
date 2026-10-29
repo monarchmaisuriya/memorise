@@ -1,10 +1,11 @@
 {
   "name": "memorise",
   "private": true,
-  "version": "0.9.1",
+  "version": "0.10.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
+    "INTEROP.md",
     "assets/",
     "index.client.tsx",
     "index.server.ts",

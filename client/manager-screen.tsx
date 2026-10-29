@@ -318,8 +318,8 @@ function ProposalsView({ pending, repoKeys, styles }: { pending: { repoKey: stri
       <Text style={styles.title}>Suggestions</Text>
       <Text style={styles.muted}>
         {total === 0
-          ? "Nothing to review. Suggestions from sessions, project files, and clean-ups appear here."
-          : "Memories and changes suggested by sessions, project files, and clean-ups, across every project. Nothing reaches agents until you approve it, unless a project saves suggestions without review."}
+          ? "Nothing to review. Suggestions from sessions, project files, clean-ups, and other plugins appear here."
+          : "Memories and changes suggested by sessions, project files, clean-ups, and other plugins, across every project. Nothing reaches agents until you approve it, unless a project saves suggestions without review; other plugins' suggestions always wait for you."}
       </Text>
       <View style={styles.row}>
         <Button label={tidyAll.isPending ? "Starting clean-up" : `Clean up all projects (${repoKeys.length})`} disabled={tidyAll.isPending || repoKeys.length === 0} styles={styles} onPress={() => tidyAll.mutate()} />

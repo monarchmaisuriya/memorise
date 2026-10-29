@@ -330,7 +330,14 @@ export const proposalSchema = z.object({
   body: bodySchema,
   paths: z.array(pathGlobSchema).max(MAX_PATH_GLOBS).default([]),
   reason: z.string().trim().max(300).default(""),
-  source: z.object({ from: z.enum(["capture", "tidy", "project"]), agentId: z.string().nullable(), provider: z.string(), model: z.string().nullable() }),
+  // "plugin": another Paseo plugin sent it through the interop inbox (INTEROP.md); `plugin` names it.
+  source: z.object({
+    from: z.enum(["capture", "tidy", "project", "plugin"]),
+    plugin: z.string().optional(),
+    agentId: z.string().nullable(),
+    provider: z.string(),
+    model: z.string().nullable(),
+  }),
   created: z.iso.datetime(),
   hash: z.string().regex(/^[0-9a-f]{64}$/),
 });

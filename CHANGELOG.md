@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-29
+
+### Added
+
+- Interop for other Paseo plugins, documented in `INTEROP.md`. Paseo has no plugin-to-plugin calls, so Memorise now writes a heartbeat (`interop/v1/status.json`, every 2 minutes) and each project's memory list without memory text (`interop/v1/export/`). It also reads suggestions from `interop/v1/inbox/`. Another plugin may only suggest replacing or archiving an existing memory, with a reason. Valid suggestions appear in Suggestions as "Suggested by <plugin>" and always wait for you, even in a project that saves suggestions without review. Invalid ones are moved to `interop/v1/inbox-rejected/` with the reason. At most 20 are accepted per project per day.
+
 ## [0.9.1] - 2026-10-26
 
 ### Fixed

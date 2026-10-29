@@ -54,6 +54,11 @@ export function providerName(provider: string | null): string {
   return provider ? (PROVIDER_NAME[provider] ?? provider) : "an agent";
 }
 
+// A plugin id as a name: "contextualise" -> "Contextualise", "my-plugin" -> "My Plugin".
+export function pluginName(id: string): string {
+  return id.split("-").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
 export function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
