@@ -4,6 +4,13 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-02
+
+### Fixed
+
+- After a Mac restart, every folder outside git got a second project key ending in `-2`, so its memories and suggestions were split across two keys and Contextualise (which uses the first key since 0.22.1) did not show the new ones. macOS can give a disk another device number each time it mounts it, and Memorise compared that number. A folder is now recognised by its inode and creation time only, as in Contextualise, so both plugins give it the same key.
+- Folders that already got such keys are repaired at the next start. In `folders.json`, the later keys become `aliases` of the first one, and no new folder is ever given an alias key. Memories and suggestions saved under an alias key move to the first key; a suggestion already waiting there, rejected before, or equal to a current memory is not copied. Nothing is deleted: the old files are kept next to where they were, with `.merged` added to their names. Agents, the Memory panel, and interop inbox files that still name an alias key act on the first key.
+
 ## [0.10.1] - 2026-10-29
 
 ### Fixed
