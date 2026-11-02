@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { statSync } from "node:fs";
+import { mkdir, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type MemorySettings, memorySettings, updateMemoryRpc } from "../shared/memory";
-import { contributeMemory } from "./plugin";
+import { contributeMemory, mergeAliasKeys } from "./plugin";
+import { ProjectKeys } from "./project-keys";
 import { ProposalStore } from "./proposals";
+import { folderKey } from "./repo-key";
+import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
 
 type Handler = (...args: never[]) => unknown;
@@ -89,6 +93,21 @@ describe("memorise server entry", () => {
     cleanup = contributeMemory(fake.server, async () => root) as () => unknown;
     return fake;
   }
+
+  it("acts on the key a folder now goes by when the panel names one of its alias keys", async () => {
+    const notes = await realpath(tempDir("plugin-alias-"));
+    const info = statSync(notes, { bigint: true });
+    const kept = folderKey(notes);
+    const alias = `${kept}-2`;
+    const same = { path: notes, ino: String(info.ino), born: String(info.birthtimeNs), root: false };
+    await writeFile(join(root, "folders.json"), JSON.stringify({ version: 1, folders: [{ key: kept, dev: "1", ...same }, { key: alias, dev: "2", ...same }] }));
+    const fake = start();
+    await fake.call("memory.save", { where: { repoKey: alias }, scope: "repo", type: "howto", subject: "notes", body: "Notes are in notes.md." });
+    expect((await fake.call("memory.list", { where: { repoKey: kept } })).facts.map((fact: { repoKey: string }) => fact.repoKey)).toEqual([kept]);
+    expect((await fake.call("memory.list", { where: { repoKey: alias } })).repoKey).toBe(kept);
+    await fake.call("memory.repo-prefs.set", { repoKey: alias, prefs: { capture: "off" } });
+    expect((await fake.call("memory.repo-prefs.get", { repoKey: kept })).prefs.capture).toBe("off");
+  });
 
   it("gives a new agent the index and both tool servers, keeping other plugins' servers", async () => {
     const fake = start();
@@ -523,5 +542,42 @@ describe("memorise server entry", () => {
       { repoKey: "github.com/acme/docs", active: 0, retired: 0, lastModified: null, label: null },
       { repoKey: "github.com/acme/web", active: 0, retired: 0, lastModified: null, label: null },
     ]);
+  });
+});
+
+describe("memories and suggestions under a folder's alias keys", () => {
+  it("move to the key the folder now goes by, keeping the old files and copying no duplicate suggestion", async () => {
+    const root = tempDir("alias-");
+    const notes = join(tempDir("alias-folders-"), "notes");
+    await mkdir(notes);
+    const info = statSync(notes, { bigint: true });
+    const kept = folderKey(await realpath(notes));
+    const alias = `${kept}-2`;
+    const same = { path: await realpath(notes), ino: String(info.ino), born: String(info.birthtimeNs), root: true };
+    await writeFile(join(root, "folders.json"), JSON.stringify({ version: 1, folders: [{ key: kept, dev: "1", ...same }, { key: alias, dev: "2", ...same }] }));
+    const store = new MemoryStore(root);
+    const proposals = new ProposalStore(root);
+    const keys = new ProjectKeys(root);
+    const fact = { scope: "repo" as const, type: "howto" as const, subject: "deploy", supersedes: null, source: { by: "user" as const, provider: null, branch: null, commit: null }, citations: [] };
+    const first = await store.create({ ...fact, repoKey: alias, body: "Deploy with make." });
+    const current = await store.supersede(first.id, alias, { body: "Deploy with make deploy." });
+    const source = { from: "capture" as const, agentId: "a", provider: "codex", model: null };
+    const suggestion = { kind: "new" as const, targets: [], type: "howto" as const, paths: [], reason: "", source };
+    await proposals.add([{ ...suggestion, repoKey: kept, subject: "tests", body: "Run make test." }], []);
+    await proposals.add([{ ...suggestion, repoKey: alias, subject: "tests", body: "Run make test." }, { ...suggestion, repoKey: alias, subject: "lint", body: "Run make lint." }], []);
+
+    await mergeAliasKeys(store, proposals, keys);
+    await mergeAliasKeys(store, proposals, keys);
+
+    const listed = (await store.list(kept)).filter((item) => item.scope === "repo");
+    expect(listed.map((item) => [item.id, item.repoKey, item.superseded])).toEqual(expect.arrayContaining([[first.id, kept, true], [current.id, kept, false]]));
+    expect((await store.history(current.id, kept)).map((version) => version.id)).toEqual([current.id, first.id]);
+    expect((await store.list(alias)).filter((item) => item.scope === "repo")).toEqual([]);
+    expect((await proposals.list(kept)).map((item) => [item.subject, item.repoKey])).toEqual([["tests", kept], ["lint", kept]]);
+    expect(await proposals.list(alias)).toEqual([]);
+    const aside = [...(await readdir(join(root, "repos", ...alias.split("/")))), ...(await readdir(join(root, "proposals", ...alias.split("/"))))];
+    expect(aside.filter((name) => name.endsWith(".md.merged")).sort()).toEqual([`${first.id}.md.merged`, `${current.id}.md.merged`].sort());
+    expect(aside.filter((name) => name.endsWith(".json.merged"))).toHaveLength(2);
+    expect(aside).toHaveLength(4);
   });
 });

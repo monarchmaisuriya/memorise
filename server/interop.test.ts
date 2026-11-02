@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { INBOX_DAILY_LIMIT, Interop } from "./interop";
+import { ProjectKeys } from "./project-keys";
 import { ProposalStore } from "./proposals";
 import { MemoryStore, type NewFact } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -47,7 +48,7 @@ describe("Interop", () => {
     root = tempDir("memorise-interop-");
     store = new MemoryStore(root);
     proposals = new ProposalStore(root);
-    interop = new Interop({ root, store, proposals, now: () => NOW });
+    interop = new Interop({ root, store, proposals, keys: new ProjectKeys(root), now: () => NOW });
   });
 
   it("writes a status file that names the contract version and the time", async () => {
@@ -102,6 +103,16 @@ describe("Interop", () => {
       source: { from: "plugin", plugin: "contextualise", agentId: null, provider: "contextualise", model: null },
     });
     expect(await readdir(join(v1(), "inbox", "github.com", "acme", "api"))).toEqual([]);
+  });
+
+  it("files a suggestion left under a folder's alias key for the key the folder now goes by", async () => {
+    const alias = `${REPO}-2`;
+    const keys = { canonical: async (key: string | null) => (key === alias ? REPO : key) } as Pick<ProjectKeys, "canonical">;
+    interop = new Interop({ root, store, proposals, keys, now: () => NOW });
+    const fact = await store.create(repoFact("parseItemRef accepts bare Jira keys."));
+    await drop("a.json", suggestion(fact.id), alias);
+    expect(await interop.ingest()).toEqual({ accepted: 1, rejected: 0 });
+    expect((await proposals.list(REPO)).map((proposal) => [proposal.repoKey, proposal.targets])).toEqual([[REPO, [fact.id]]]);
   });
 
   it("files a replace suggestion with the new wording", async () => {

@@ -77,26 +77,37 @@ export class ProposalStore {
     return repos.sort((a, b) => a.repoKey.localeCompare(b.repoKey));
   }
 
-  // Adds the proposals that are new: not pending already, not rejected before, and not the same as
-  // a current fact. Returns the ones added. Every proposal passes the same checks as a saved fact.
+  // Hashes of proposals that are not new in a repo: pending already, rejected before, or the same as
+  // a current fact.
+  private async known(repoKey: string, currentFacts: readonly FactListItem[]): Promise<Set<string>> {
+    const skip = await this.rejected();
+    for (const pending of await this.list(repoKey)) skip.add(pending.hash);
+    for (const fact of currentFacts) if (!fact.superseded && fact.status === "active") skip.add(proposalHash({ kind: "new", targets: [], subject: fact.subject, body: fact.body }));
+    return skip;
+  }
+
+  private async write(proposal: Proposal): Promise<void> {
+    const dir = this.repoDir(proposal.repoKey);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const path = join(dir, `${proposal.id}.json`);
+    const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+    await writeFile(temp, JSON.stringify(proposal, null, 2), { mode: 0o600 });
+    await rename(temp, path);
+  }
+
+  // Adds the proposals that are new. Returns the ones added. Every proposal passes the same checks
+  // as a saved fact.
   add(candidates: readonly NewProposal[], currentFacts: readonly FactListItem[]): Promise<Proposal[]> {
     return this.serialize(async () => {
       const added: Proposal[] = [];
-      const skip = await this.rejected();
-      for (const pending of await this.list(candidates[0]?.repoKey ?? "local/none")) skip.add(pending.hash);
-      for (const fact of currentFacts) if (!fact.superseded && fact.status === "active") skip.add(proposalHash({ kind: "new", targets: [], subject: fact.subject, body: fact.body }));
+      const skip = await this.known(candidates[0]?.repoKey ?? "local/none", currentFacts);
       for (const candidate of candidates) {
         const hash = proposalHash(candidate);
         if (skip.has(hash)) continue;
         try {
           assertNoSecret(candidate.subject, candidate.body);
           const proposal = proposalSchema.parse({ ...candidate, id: newFactId(), created: new Date().toISOString(), hash });
-          const dir = this.repoDir(proposal.repoKey);
-          await mkdir(dir, { recursive: true, mode: 0o700 });
-          const path = join(dir, `${proposal.id}.json`);
-          const temp = `${path}.${randomBytes(4).toString("hex")}.tmp`;
-          await writeFile(temp, JSON.stringify(proposal, null, 2), { mode: 0o600 });
-          await rename(temp, path);
+          await this.write(proposal);
           skip.add(hash);
           added.push(proposal);
         } catch (error) {
@@ -104,6 +115,31 @@ export class ProposalStore {
         }
       }
       return added;
+    });
+  }
+
+  // Moves a project's proposals from a key it no longer goes by into the key it now means, keeping
+  // their ids and dates. One that is not new there (see known), such as one copied before its rename
+  // failed, is not copied. Every old file is then renamed aside with ".merged", never deleted. A file
+  // that cannot be moved is reported and left; the others still move. Returns how many moved.
+  mergeRepo(from: string, into: string, currentFacts: readonly FactListItem[]): Promise<number> {
+    return this.serialize(async () => {
+      const skip = await this.known(into, currentFacts);
+      const dir = this.repoDir(from);
+      let moved = 0;
+      for (const proposal of await this.list(from)) {
+        try {
+          if (!skip.has(proposal.hash)) {
+            await this.write({ ...proposal, repoKey: into });
+            skip.add(proposal.hash);
+            moved += 1;
+          }
+          await rename(join(dir, `${proposal.id}.json`), join(dir, `${proposal.id}.json.merged`));
+        } catch (error) {
+          console.error(`[memorise] could not move suggestion ${proposal.id} from ${from} to ${into}: ${String(error)}`);
+        }
+      }
+      return moved;
     });
   }
 

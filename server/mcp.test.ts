@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import { checkCitations } from "./citations";
 import { type AgentScope, loadTokenSecret, TokenAuthority } from "./mcp-auth";
 import { MemoryMcp, mcpServerEntries, READ_SERVER, WRITE_SERVER } from "./mcp";
 import { ProjectKeys } from "./project-keys";
+import { folderKey } from "./repo-key";
 import { SearchIndex } from "./search-index";
 import { MemoryStore } from "./store";
 import { tempDir } from "./test-temp-dir";
@@ -174,6 +175,19 @@ describe("memory MCP servers", () => {
     expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md changed since it was cited"]]));
     await rm(join(plain, "notes", "plan.md"));
     expect(await checkCitations({ cwd: plain, root: project.root }, [fact], 1_000)).toEqual(new Map([[fact.id, "notes/plan.md is missing"]]));
+  });
+
+  it("lets an agent whose token names a folder's alias key work on the key the folder now goes by", async () => {
+    const plain = await realpath(tempDir("mcp-alias-"));
+    await writeFile(join(plain, "plan.md"), "Day one.\n");
+    const info = await stat(plain, { bigint: true });
+    const kept = folderKey(plain);
+    const same = { path: plain, ino: String(info.ino), born: String(info.birthtimeNs), root: false };
+    await writeFile(join(store.root, "folders.json"), JSON.stringify({ version: 1, folders: [{ key: kept, dev: "1", ...same }, { key: `${kept}-2`, dev: "2", ...same }] }));
+    const auth = bearer({ repoKey: `${kept}-2`, cwd: plain, provider: "claude" });
+    expect((await call(await connect("write", auth), "memory_write", { type: "howto", subject: "plan", fact: "The plan is in plan.md.", citations: [{ path: "plan.md" }] })).isError).toBe(false);
+    expect((await store.list(kept)).map((fact) => [fact.subject, fact.repoKey])).toEqual([["plan", kept]]);
+    expect((await call(await connect("read", auth), "memory_search", { query: "plan" })).text).toMatch(/The plan is in plan\.md/);
   });
 
   it("refuses to cite files in a folder that belongs to another project than when the agent started", async () => {

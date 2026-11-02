@@ -81,6 +81,45 @@ describe("project keys", () => {
     expect((await new ProjectKeys(data).resolve(notes)).key).toBe(folderKey(notes));
   });
 
+  it("keeps a folder's key after a restart gives its disk another device number", async () => {
+    const data = tempDir("keys-data-");
+    const notes = await folder(tempDir("keys-"), "notes");
+    const { key } = await new ProjectKeys(data).resolve(notes);
+    const file = join(data, "folders.json");
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    saved.folders[0].dev = "1";
+    await writeFile(file, JSON.stringify(saved));
+    expect((await new ProjectKeys(data).resolve(notes)).key).toBe(key);
+  });
+
+  it("folds the keys one folder got per device number into the first, and maps the later ones to it", async () => {
+    const data = tempDir("keys-data-");
+    const notes = await folder(tempDir("keys-"), "notes");
+    const info = statSync(notes, { bigint: true });
+    const same = { path: notes, ino: String(info.ino), born: String(info.birthtimeNs) };
+    const first = folderKey(notes);
+    await writeFile(join(data, "folders.json"), JSON.stringify({ version: 1, folders: [
+      { key: first, dev: "1", root: false, ...same },
+      { key: `${first}-2`, dev: "2", root: true, ...same },
+    ] }));
+    const keys = new ProjectKeys(data);
+    expect(await keys.resolve(notes)).toEqual({ key: first, root: notes });
+    expect(await keys.aliases()).toEqual(new Map([[`${first}-2`, first]]));
+    expect(await keys.canonical(`${first}-2`)).toBe(first);
+    expect(await keys.canonical("github.com/acme/api")).toBe("github.com/acme/api");
+    const saved = JSON.parse(await readFile(join(data, "folders.json"), "utf8"));
+    expect(saved.folders).toMatchObject([{ key: first, root: true, aliases: [`${first}-2`] }]);
+  });
+
+  it("never gives a new folder a key that is now another folder's alias", async () => {
+    const data = tempDir("keys-data-");
+    const notes = await folder(tempDir("keys-"), "notes");
+    const base = folderKey(notes);
+    const lost = { key: base, path: notes, dev: "1", ino: "1", born: "1", root: false, aliases: [`${base}-2`] };
+    await writeFile(join(data, "folders.json"), JSON.stringify({ version: 1, folders: [lost] }));
+    expect((await new ProjectKeys(data).resolve(notes)).key).toBe(`${base}-3`);
+  });
+
   it("keeps each folder's key when two folders swap paths, whichever is seen first", async () => {
     const parent = tempDir("keys-");
     for (const order of [["a", "x"], ["x", "a"]]) {
@@ -134,6 +173,7 @@ describe("project keys", () => {
     await writeFile(join(data, "folders.json"), "{ broken");
     const keys = new ProjectKeys(data);
     await expect(keys.resolve(tempDir("keys-"))).rejects.toThrow(/folders\.json could not be read/);
+    expect(await keys.canonical("github.com/acme/api")).toBe("github.com/acme/api");
     const repo = tempDir("keys-repo-");
     execFileSync("git", ["init", "-q", repo]);
     expect((await keys.resolve(repo)).key).toMatch(/^local\//);

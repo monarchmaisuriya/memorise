@@ -332,11 +332,13 @@ export class MemoryMcp {
       res.writeHead(405, { Allow: "POST" }).end("Only POST is supported");
       return;
     }
-    const scope = this.options.tokens.verify(req.headers.authorization);
-    if (!scope) {
+    const verified = this.options.tokens.verify(req.headers.authorization);
+    if (!verified) {
       res.writeHead(401).end("Memory token missing or not valid. Recreate the agent to get a new one.");
       return;
     }
+    // A token made while the folder went by an alias key keeps working, on the key it now means.
+    const scope = { ...verified, repoKey: await this.options.keys.canonical(verified.repoKey) };
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of req) {

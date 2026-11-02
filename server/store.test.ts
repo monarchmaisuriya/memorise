@@ -1,4 +1,4 @@
-import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { factIdSchema } from "../shared/memory";
@@ -194,5 +194,27 @@ describe("MemoryStore", () => {
     expect(retitled.body).toHaveLength(3_000);
     await expect(shrinking.supersede(retitled.id, REPO, { body: "y".repeat(2_000) })).rejects.toThrow("Memory must be 1,000 characters or less; this one has 2,000");
     expect((await shrinking.retire(retitled.id, REPO)).status).toBe("retired");
+  });
+
+  it("moves a project's memories to another key without copying one again that was changed there, and moves the rest when one file cannot move", async () => {
+    const alias = `${REPO}-2`;
+    const aliasDir = join(store.root, "repos", ...alias.split("/"));
+    const moved = await store.create(repoFact("Moved, then retired.", { repoKey: alias }));
+    await store.mergeRepo(alias, REPO);
+    // As if the rename after the copy had failed: the old file is still there.
+    await rename(join(aliasDir, `${moved.id}.md.merged`), join(aliasDir, `${moved.id}.md`));
+    await store.retire(moved.id, REPO);
+    const later = await store.create(repoFact("Saved later.", { repoKey: alias }));
+    const stuck = await store.create(repoFact("Misnamed by hand.", { repoKey: alias }));
+    await rename(join(aliasDir, `${stuck.id}.md`), join(aliasDir, "hand-edited.md"));
+
+    expect(await store.mergeRepo(alias, REPO)).toBe(2);
+
+    const listed = new Map((await store.list(REPO)).map((fact) => [fact.id, fact]));
+    expect(listed.get(moved.id)?.status).toBe("retired");
+    expect(listed.get(later.id)?.repoKey).toBe(REPO);
+    // The misnamed file is copied but cannot be renamed aside, so it stays as it is.
+    expect(listed.get(stuck.id)?.repoKey).toBe(REPO);
+    expect((await readdir(aliasDir)).sort()).toEqual([`${later.id}.md.merged`, `${moved.id}.md.merged`, "hand-edited.md"].sort());
   });
 });
