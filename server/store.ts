@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "yaml";
 import { bodyLengthProblem, DEFAULT_BODY_CHARS, type Fact, type FactListItem, factIdSchema, factSchema, repoKeySchema, type Scope } from "../shared/memory";
@@ -211,6 +211,31 @@ export class MemoryStore {
       const { superseded: _superseded, ...fact } = await this.get(id, repoKey);
       const now = new Date().toISOString();
       return this.save({ ...fact, status: "active", modified: now, lastUsed: now });
+    });
+  }
+
+  // Moves a project's memories from a key it no longer goes by into the key it now means. Each is
+  // written under the new key first, then its old file is renamed aside with ".merged", never deleted.
+  // One already under the new key (copied before its rename failed) is not copied again, as it may
+  // have been retired or pinned there since. A file that cannot be moved is reported and left; the
+  // others still move. Returns how many moved.
+  mergeRepo(from: string, into: string): Promise<number> {
+    return this.serialize(async () => {
+      const dir = this.dirFor("repo", from);
+      let moved = 0;
+      for (const fact of await this.readDir(dir)) {
+        try {
+          const copy = { ...fact, repoKey: into };
+          if (!(await access(this.pathFor(copy)).then(() => true, () => false))) {
+            await this.save(copy);
+            moved += 1;
+          }
+          await rename(join(dir, `${fact.id}.md`), join(dir, `${fact.id}.md.merged`));
+        } catch (error) {
+          console.error(`[memorise] could not move memory ${fact.id} from ${from} to ${into}: ${String(error)}`);
+        }
+      }
+      return moved;
     });
   }
 

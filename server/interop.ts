@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { bodySchema, factIdSchema, repoKeySchema, subjectSchema } from "../shared/memory";
+import type { ProjectKeys } from "./project-keys";
 import type { ProposalStore } from "./proposals";
 import { findSecret } from "./secrets";
 import type { MemoryStore } from "./store";
@@ -36,6 +37,7 @@ interface InteropDeps {
   root: string;
   store: MemoryStore;
   proposals: ProposalStore;
+  keys: Pick<ProjectKeys, "canonical">;
   now?: () => Date;
 }
 
@@ -126,7 +128,9 @@ export class Interop {
     }
     let accepted = 0;
     let rejected = 0;
-    for (const { repoKey, path } of await this.inboxFiles()) {
+    for (const { repoKey: named, path } of await this.inboxFiles()) {
+      // A file under an alias key is a suggestion for the key it now means.
+      const repoKey = await this.deps.keys.canonical(named);
       if ((this.acceptedToday.get(repoKey) ?? 0) >= INBOX_DAILY_LIMIT) continue;
       try {
         const { suggestion, fact } = await this.read(path, repoKey);

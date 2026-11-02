@@ -81,6 +81,26 @@ interface Runtime {
   http: Server | null;
 }
 
+// Memories and suggestions saved under a folder's alias keys (one per device number the folder had,
+// before 0.10.2) move to the key it now goes by, before anything else reads them. Memories go first,
+// so a suggestion equal to one of them is not copied. A failure leaves the files where they were,
+// to try again at the next start.
+export async function mergeAliasKeys(store: MemoryStore, proposals: ProposalStore, keys: ProjectKeys): Promise<void> {
+  const aliases = await keys.aliases().catch((error: unknown) => {
+    console.error(`[memorise] folder key aliases could not be read: ${String(error)}`);
+    return new Map<string, string>();
+  });
+  for (const [alias, kept] of aliases) {
+    try {
+      const memories = await store.mergeRepo(alias, kept);
+      const suggestions = await proposals.mergeRepo(alias, kept, await store.list(kept));
+      if (memories + suggestions > 0) console.log(`[memorise] moved ${memories} memories and ${suggestions} suggestions from ${alias} to ${kept}; the old files are kept with ".merged" added`);
+    } catch (error) {
+      console.error(`[memorise] could not move ${alias} into ${kept}: ${String(error)}`);
+    }
+  }
+}
+
 export function contributeMemory(server: PluginServerContext, resolveRoot: () => Promise<string>) {
   const settings = server.registerSettings(memorySettings);
 
@@ -109,10 +129,11 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     const repoPrefs = new RepoPrefs(root);
     // A folder with memories or proposals of its own stays its own project under a later project root.
     const keys = new ProjectKeys(root, async (key) => (await store.list(key)).some((fact) => fact.scope === "repo") || (await proposals.list(key)).length > 0);
+    await mergeAliasKeys(store, proposals, keys);
     const capture = new Capture({ root, store, proposals, usage, repoPrefs, keys, settings: currentSettings });
     capture.startWeeklyTidy(() => store.repoKeys());
     capture.startProjectScans();
-    const stopInterop = new Interop({ root, store, proposals }).start();
+    const stopInterop = new Interop({ root, store, proposals, keys }).start();
     const { mcpPort } = await currentSettings();
     const mcp = new MemoryMcp({
       store,
@@ -311,7 +332,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   });
 
   // The panel names a workspace folder; the manager names a repo key, or null for global only.
-  const repoKeyOf = async (where: Where): Promise<string | null> => ("directory" in where ? (await runtime).keys.keyOf(where.directory) : where.repoKey);
+  const repoKeyOf = async (where: Where): Promise<string | null> => ("directory" in where ? (await runtime).keys.keyOf(where.directory) : (await runtime).keys.canonical(where.repoKey));
 
   server.handle(listMemoriesRpc, async ({ where }) => {
     const [{ store, usage }, repoKey, values] = await Promise.all([runtime, repoKeyOf(where), currentSettings()]);
@@ -407,9 +428,15 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     return { added, skipped };
   });
 
-  server.handle(getRepoPrefsRpc, async ({ repoKey }) => ({ prefs: await (await runtime).repoPrefs.get(repoKey) }));
+  server.handle(getRepoPrefsRpc, async ({ repoKey }) => {
+    const { repoPrefs, keys } = await runtime;
+    return { prefs: await repoPrefs.get(await keys.canonical(repoKey)) };
+  });
 
-  server.handle(setRepoPrefsRpc, async ({ repoKey, prefs }) => ({ prefs: await (await runtime).repoPrefs.set(repoKey, prefs) }));
+  server.handle(setRepoPrefsRpc, async ({ repoKey, prefs }) => {
+    const { repoPrefs, keys } = await runtime;
+    return { prefs: await repoPrefs.set(await keys.canonical(repoKey), prefs) };
+  });
 
   // Every repo the manager can work on: those with memories (with counts), those with an open Paseo
   // workspace, and those with proposals waiting. Global comes first, then repos by key.
@@ -509,9 +536,10 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     }
     if (!where.repoKey) throw new Error("Suggesting from project files works on one project; choose one.");
     const { root, keys } = await runtime;
-    const folder = (await openRepoCheckouts(paseo, root, keys)).get(where.repoKey);
-    if (folder) return { repoKey: where.repoKey, folder };
-    throw new Error(`Open a workspace of ${where.repoKey} in Paseo first; suggesting from project files reads that checkout's files.`);
+    const repoKey = await keys.canonical(where.repoKey);
+    const folder = (await openRepoCheckouts(paseo, root, keys)).get(repoKey);
+    if (folder) return { repoKey, folder };
+    throw new Error(`Open a workspace of ${repoKey} in Paseo first; suggesting from project files reads that checkout's files.`);
   }
 
   // Starts a project scan and returns at once; its proposals appear in the inbox when it finishes.
