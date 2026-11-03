@@ -316,6 +316,17 @@ describe("capture", () => {
     expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1, ids: [] } });
   });
 
+  it("with auto mode on, a memory that could not be saved stays a suggestion on the chat card", async () => {
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    vi.spyOn(proposals, "approve").mockRejectedValueOnce(new Error("disk full"));
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    const waiting = await proposals.list(REPO);
+    expect(waiting).toHaveLength(1);
+    expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 1, autoSaved: 0, ids: [waiting[0].id] } });
+  });
+
   it("follows a repo's capture setting over the host setting", async () => {
     values = { ...values, captureEnabled: false };
     await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "on" });

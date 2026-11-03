@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-11-03
+
+### Changed
+
+- No change in behavior. A test now covers a suggestion that auto-approve could not save: it stays waiting and is listed on its chat card, instead of being counted as saved.
+
 ## [0.10.4] - 2026-11-03
 
 ### Fixed
