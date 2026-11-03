@@ -468,11 +468,15 @@ describe("memorise server entry", () => {
     // What is in the timeline before the agent is created is not its use.
     fake.addToTimeline("agent-9", [{ ...read, callId: "c0" }]);
     await fake.agentCreated("agent-9", cwd);
-    expect(fake.appended).toEqual([{ agentId: "agent-9", row: { type: "plugin", id: "memorise-receipt", kind: "memorise-receipt", version: 1, data: { listed: 2, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 } } }]);
+    expect(fake.appended).toEqual([{ agentId: "agent-9", row: { type: "plugin", id: expect.stringMatching(/^memorise-receipt:/), kind: "memorise-receipt", version: 1, data: { listed: 2, opened: 0, searched: 0, saved: 0, archived: 0, other: 0 } } }]);
     await fake.turnEnded("agent-9", cwd, [read, { ...read, callId: "c2" }]);
     await fake.turnEnded("agent-9", cwd, [{ type: "assistant_message", text: "done" }]);
     expect(fake.appended).toHaveLength(2);
     expect(fake.appended[1].row.data).toEqual({ listed: 2, opened: 2, searched: 0, saved: 0, archived: 0, other: 0 });
+    // A new row each time: Paseo stretches a replaced row across every reply in between, and refuses
+    // to fork from those replies.
+    expect(fake.appended[1].row.id).toMatch(/^memorise-receipt:/);
+    expect(fake.appended[1].row.id).not.toBe(fake.appended[0].row.id);
   });
 
   it("adds no receipt when the setting is off", async () => {

@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-03
+
+### Fixed
+
+- In Paseo, forking from a reply in an agent Memorise prepared failed with "This checkpoint changed after it was created. Fork from a later completed response instead." once the agent used a memory tool in a later turn. Memorise updated its receipt and proposals cards by appending them again under the same id. Paseo keeps such a row where it first appeared and stretches it to the latest update, and it refuses to fork from any reply inside that stretch. Each card now gets its own id, so a chat shows one receipt line when the agent starts and one more, with the totals so far, after each turn that used memory. Chats already open keep the stretched card until Paseo restarts; until then, "Fork current context" still works there.
+
 ## [0.10.2] - 2026-11-02
 
 ### Fixed

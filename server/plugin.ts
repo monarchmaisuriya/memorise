@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { resolve } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -213,10 +214,13 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   // depends only on the folder, so agents created together in one folder share it.
   const listedByFolder = new Map<string, { count: number; at: number }>();
   const RECEIPT_MATCH_MS = 60_000;
+  // A new row per update, never a reused id: Paseo stretches a replaced row across every reply in
+  // between and refuses to fork from those replies. Go back to one replaced row once Paseo's fork
+  // check ignores plugin rows.
   const appendReceipt = (paseo: PaseoApi, agentId: string, receipt: Receipt) =>
     paseo.agents
       .ref(agentId)
-      .timeline.append({ type: "plugin", id: RECEIPT_KIND, kind: RECEIPT_KIND, version: 1, data: receipt })
+      .timeline.append({ type: "plugin", id: `${RECEIPT_KIND}:${randomUUID()}`, kind: RECEIPT_KIND, version: 1, data: receipt })
       .catch((error: unknown) => console.error(`[memorise] could not show the memory receipt for agent ${agentId}: ${error instanceof Error ? error.message : String(error)}`));
 
   server.before("agent.create", async ({ request }, { paseo }) => {

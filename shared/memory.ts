@@ -381,8 +381,8 @@ export const PROPOSALS_CARD_KIND = "memorise-proposals";
 // count: proposals waiting; autoSaved: memories saved automatically (auto-approve on).
 export const proposalsCardSchema = z.object({ count: z.number().int().min(0), autoSaved: z.number().int().min(0).default(0) });
 
-// One row per agent in its chat: how many memories its prompt listed, and how it used the memory
-// tools so far. The row is replaced as the totals grow.
+// A row in an agent's chat: how many memories its prompt listed, and how it used the memory tools
+// so far. Each update is a new row (see appendReceipt in server/plugin.ts).
 export const RECEIPT_KIND = "memorise-receipt";
 export const memoryUseSchema = z.object({
   opened: z.number().int().min(0),
