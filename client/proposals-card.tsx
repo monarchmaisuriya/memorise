@@ -6,6 +6,7 @@ import type { z } from "zod";
 import { approveProposalRpc, listProposalsRpc, type proposalsCardSchema, rejectProposalRpc } from "../shared/memory";
 import { memoryChanged } from "./memory-events";
 import { errorText } from "./copy";
+import { cardSuggestions } from "./proposals-view";
 
 type CardData = z.infer<typeof proposalsCardSchema>;
 type Theme = PluginTimelineItemProps<CardData>["theme"];
@@ -38,8 +39,8 @@ function Suggestion({ subject, body, theme, onDecide }: { subject: string; body:
   );
 }
 
-// This session's proposals that are still waiting, each with Approve and Reject.
-function Pending({ agentId, workspaceId, theme }: { agentId: string; workspaceId: string; theme: Theme }) {
+// This card's proposals that are still waiting, each with Approve and Reject.
+function Pending({ agentId, workspaceId, ids, theme }: { agentId: string; workspaceId: string; ids: readonly string[] | undefined; theme: Theme }) {
   const directory = useWorkspace(workspaceId, (workspace) => workspace.directory);
   const list = useRpc(listProposalsRpc);
   const approve = useRpc(approveProposalRpc);
@@ -60,7 +61,7 @@ function Pending({ agentId, workspaceId, theme }: { agentId: string; workspaceId
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
   if (query.isPending) return <Text style={muted}>Loading suggestions</Text>;
   if (query.error) return <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{errorText(query.error)}</Text>;
-  const mine = query.data.proposals.filter((proposal) => proposal.source.agentId === agentId);
+  const mine = cardSuggestions(query.data.proposals, agentId, ids);
   return (
     <View style={{ gap: 4 }}>
       {mine.length === 0 && <Text style={muted}>All reviewed.</Text>}
@@ -85,7 +86,7 @@ export function ProposalsCard({ agentId, item, theme, openPanel }: PluginTimelin
         {workspaceId && <TextAction label="Edit in Memorise" accessibilityLabel="Edit suggestions in the Memorise panel" color={theme.colors.foregroundMuted} onPress={() => openPanel(workspaceId)} />}
       </View>
       {workspaceId ? (
-        <Pending agentId={agentId} workspaceId={workspaceId} theme={theme} />
+        <Pending agentId={agentId} workspaceId={workspaceId} ids={item.data.ids} theme={theme} />
       ) : (
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Review them in Memorise, under Suggestions.</Text>
       )}

@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-03
+
+### Fixed
+
+- Since 0.10.3 a chat gets a new suggestions card after each capture pass, and every card listed all of the agent's waiting suggestions, so the same Approve and Reject rows repeated down a long chat. A card now lists only the suggestions its own pass added that are still waiting, and says "All reviewed." once those are decided. Cards added before this release, still shown until Paseo restarts, keep listing every waiting suggestion from the agent.
+
 ## [0.10.3] - 2026-11-03
 
 ### Fixed
