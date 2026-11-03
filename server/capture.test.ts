@@ -429,6 +429,21 @@ describe("capture", () => {
     expect(fake.appended[0]).toMatchObject({ type: "plugin", kind: "memorise-proposals", data: { count: 1 } });
   });
 
+  it("gives each proposals card its own id, so a later card never replaces an earlier one", async () => {
+    // Paseo stretches a replaced row across every reply in between, and refuses to fork from those replies.
+    const items = conversation(5);
+    const first = fakePaseo(items, reply);
+    capture.remember(first.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    items.push(...conversation(5).map((item) => (item.type === "user_message" ? { ...item, text: `later ${item.text}` } : item)));
+    const second = fakePaseo(items, JSON.stringify({ facts: [{ type: "howto", subject: "later", body: "A later fact.", paths: [] }] }));
+    capture.remember(second.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    const ids = [first.appended[0], second.appended[0]].map((row) => (row as { id: string }).id);
+    expect(ids).toEqual([expect.stringMatching(/^memorise-proposals:/), expect.stringMatching(/^memorise-proposals:/)]);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
   it("ignores the model setting when each session is read by its own provider", async () => {
     values = { ...values, captureProvider: "session", captureModel: "claude-sonnet-5-5" };
     const fake = fakePaseo(conversation(5), reply);
