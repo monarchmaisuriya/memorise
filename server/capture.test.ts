@@ -313,7 +313,7 @@ describe("capture", () => {
     capture.remember(fake.paseo);
     expect(await capture.captureNow(agent)).toBe(0);
     expect((await store.list(REPO)).map((fact) => fact.source.by)).toEqual(["auto"]);
-    expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1 } });
+    expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1, ids: [] } });
   });
 
   it("follows a repo's capture setting over the host setting", async () => {
@@ -426,7 +426,7 @@ describe("capture", () => {
     const pending = await proposals.list(REPO);
     expect(pending).toMatchObject([{ kind: "new", subject: "integration tests", paths: ["scripts/**"], source: { from: "capture", agentId: "agent-1", provider: "codex" } }]);
     expect(await store.list(REPO)).toEqual([]);
-    expect(fake.appended[0]).toMatchObject({ type: "plugin", kind: "memorise-proposals", data: { count: 1 } });
+    expect(fake.appended[0]).toMatchObject({ type: "plugin", kind: "memorise-proposals", data: { count: 1, ids: pending.map((proposal) => proposal.id) } });
   });
 
   it("gives each proposals card its own id, so a later card never replaces an earlier one", async () => {
@@ -442,6 +442,9 @@ describe("capture", () => {
     const ids = [first.appended[0], second.appended[0]].map((row) => (row as { id: string }).id);
     expect(ids).toEqual([expect.stringMatching(/^memorise-proposals:/), expect.stringMatching(/^memorise-proposals:/)]);
     expect(ids[0]).not.toBe(ids[1]);
+    // Each card names only the suggestions its own pass added.
+    const bySubject = new Map((await proposals.list(REPO)).map((proposal) => [proposal.subject, proposal.id]));
+    expect([first.appended[0], second.appended[0]].map((row) => (row as { data: { ids: string[] } }).data.ids)).toEqual([[bySubject.get("integration tests")], [bySubject.get("later")]]);
   });
 
   it("ignores the model setting when each session is read by its own provider", async () => {

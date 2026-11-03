@@ -189,20 +189,23 @@ export class Capture {
 
   // Adds proposals, then, when the repo has auto-approve on, approves the new memories among them at
   // once. Changes to saved memories (tidy, replace, retire) always wait for the user.
-  private async addProposals(repoKey: string, candidates: readonly NewProposal[], facts: readonly FactListItem[]): Promise<{ pending: number; autoSaved: number }> {
+  private async addProposals(repoKey: string, candidates: readonly NewProposal[], facts: readonly FactListItem[]): Promise<{ pending: number; autoSaved: number; pendingIds: string[] }> {
     const added = await this.deps.proposals.add(candidates, facts);
-    if (!(await this.deps.repoPrefs.get(repoKey)).autoApprove) return { pending: added.length, autoSaved: 0 };
-    let autoSaved = 0;
+    if (!(await this.deps.repoPrefs.get(repoKey)).autoApprove) return { pending: added.length, autoSaved: 0, pendingIds: added.map((proposal) => proposal.id) };
+    const pendingIds: string[] = [];
     for (const proposal of added) {
-      if (proposal.kind !== "new" || proposal.source.from === "tidy") continue;
+      if (proposal.kind !== "new" || proposal.source.from === "tidy") {
+        pendingIds.push(proposal.id);
+        continue;
+      }
       try {
         await this.deps.proposals.approve(proposal.id, repoKey, this.deps.store, {}, "auto");
-        autoSaved += 1;
       } catch (error) {
+        pendingIds.push(proposal.id);
         console.error(`[memorise] could not auto-approve "${proposal.subject}": ${error instanceof Error ? error.message : String(error)}; it waits for review`);
       }
     }
-    return { pending: added.length - autoSaved, autoSaved };
+    return { pending: pendingIds.length, autoSaved: added.length - pendingIds.length, pendingIds };
   }
 
   isScanning(repoKey: string): boolean {
@@ -306,7 +309,8 @@ export class Capture {
         return [{ repoKey, kind: "retire", targets: [action.id], type: target.type, subject: target.subject, body: target.body, paths: target.paths, reason: action.reason, source }];
       }),
     ];
-    return await this.addProposals(repoKey, proposals, facts);
+    const { pending, autoSaved } = await this.addProposals(repoKey, proposals, facts);
+    return { pending, autoSaved };
   }
 
   // A repo's own capture preference overrides the host setting.
@@ -389,7 +393,7 @@ export class Capture {
         // card: Paseo refuses to fork from replies under a row that was replaced after them.
         await paseo.agents
           .ref(agent.id)
-          .timeline.append({ type: "plugin", id: `${PROPOSALS_CARD_KIND}:${randomUUID()}`, kind: PROPOSALS_CARD_KIND, version: 1, data: { count: added.pending, autoSaved: added.autoSaved } })
+          .timeline.append({ type: "plugin", id: `${PROPOSALS_CARD_KIND}:${randomUUID()}`, kind: PROPOSALS_CARD_KIND, version: 1, data: { count: added.pending, autoSaved: added.autoSaved, ids: added.pendingIds } })
           .catch((error: unknown) => console.error(`[memorise] could not add the proposals card: ${String(error)}`));
       }
       return added.pending;

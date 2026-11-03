@@ -378,8 +378,10 @@ export const rejectProposalRpc = defineRpc({
 
 // The chat card a capture pass adds to the source agent's timeline (UI only; never sent to the model).
 export const PROPOSALS_CARD_KIND = "memorise-proposals";
-// count: proposals waiting; autoSaved: memories saved automatically (auto-approve on).
-export const proposalsCardSchema = z.object({ count: z.number().int().min(0), autoSaved: z.number().int().min(0).default(0) });
+// count: proposals waiting; autoSaved: memories saved automatically (auto-approve on); ids: the
+// proposals this pass left waiting. Cards from before 0.10.4 have no ids and list every waiting
+// proposal from the agent.
+export const proposalsCardSchema = z.object({ count: z.number().int().min(0), autoSaved: z.number().int().min(0).default(0), ids: z.array(z.string()).optional() });
 
 // A row in an agent's chat: how many memories its prompt listed, and how it used the memory tools
 // so far. Each update is a new row (see appendReceipt in server/plugin.ts).
