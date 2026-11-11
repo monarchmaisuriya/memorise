@@ -128,6 +128,7 @@ Settings > Plugins > Memorise, or **Settings** in Memorise. The main level holds
 | Give agents memory | on | Off keeps saved memories |
 | Read memories without asking | on | Saving or changing a memory still asks, unless the agent runs in a mode that skips approvals |
 | Show Memorise in agent chats | off | A line when an agent starts (memories in its prompt), one after each turn that used them, with the totals so far, and a card when a session's suggestions are ready. Off: review suggestions in the Suggestions tab |
+| Notify when a background run finishes | off | Paseo's "Agent finished" notification for session suggestions, clean-ups, and project scans. Off: their worker agents are Paseo background agents and finish quietly |
 | Suggest memories from sessions | off | See below |
 | Provider that reads sessions | Same as the session | So no transcript leaves the provider that ran it |
 | Clean up each project weekly | off | Checked when the plugin starts and hourly after; clean-ups can also be started by hand |

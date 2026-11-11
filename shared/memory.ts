@@ -462,6 +462,9 @@ export const memorySettings = defineSettings({
     // Rows in agents' chats: how many memories each agent was given and how it used them, and a card
     // when a session's suggestions are ready. Off until the user turns it on.
     showInAgentChats: z.boolean().default(false),
+    // Paseo's "Agent finished" notification for Memorise's background runs (session suggestions,
+    // clean-ups, project scans). Off: their workers are background agents, which Paseo never notifies about.
+    notifyBackgroundRuns: z.boolean().default(false),
     // Project scans started by the plugin for every project with an open workspace: never, once per
     // project, or once and then a re-check each week.
     projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),

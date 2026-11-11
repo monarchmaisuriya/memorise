@@ -35,12 +35,17 @@ describe("memory settings", () => {
     expect(memorySettings.schema.parse({}).showInAgentChats).toBe(false);
   });
 
+  it("starts background runs without Paseo notifications by default, with no settings version raise", () => {
+    expect(memorySettings.schema.parse({}).notifyBackgroundRuns).toBe(false);
+    expect(memorySettings.version).toBe(2);
+  });
+
   it("turns chat rows off for settings saved before, and keeps every other value", async () => {
     expect(memorySettings.version).toBe(2);
     // Paseo runs the migration, then the schema, and saves the result.
     const migrated = memorySettings.schema.parse(await migrate(savedByVersion1, 1));
     const { showMemoryUse: _dropped, ...kept } = savedByVersion1;
-    expect(migrated).toEqual({ ...kept, showInAgentChats: false });
+    expect(migrated).toEqual({ ...kept, showInAgentChats: false, notifyBackgroundRuns: false });
   });
 
   it("refuses settings from a version it does not know", () => {

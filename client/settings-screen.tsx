@@ -113,6 +113,13 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
             disabled={settings.saving}
             onValueChange={(showInAgentChats) => save({ ...settings.values, showInAgentChats })}
           />
+          <SettingsSwitch
+            label="Notify when a background run finishes"
+            hint="Paseo's “Agent finished” notification for Memorise's session suggestions, clean-ups, and project scans. Off: they finish quietly; their suggestions still appear in the Suggestions tab."
+            value={settings.values.notifyBackgroundRuns}
+            disabled={settings.saving}
+            onValueChange={(notifyBackgroundRuns) => save({ ...settings.values, notifyBackgroundRuns })}
+          />
         </SettingsCard>
       </SettingsSection>
       <SettingsSection title="Suggestions from sessions">

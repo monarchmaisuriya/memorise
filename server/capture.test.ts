@@ -165,6 +165,22 @@ describe("capture", () => {
     expect(fake.created[0].prompt).toContain(`id: ${old.id}`);
   });
 
+  it("starts every kind of worker as a background agent unless notifications are on", async () => {
+    await writeFile(join(cwd, "README.md"), "Run make dev.\n");
+    const source = { by: "user" as const, provider: null, branch: null, commit: null };
+    for (const subject of ["one", "two"]) await store.create({ scope: "repo", repoKey: REPO, type: "howto", subject, body: subject, supersedes: null, source, citations: [] });
+    for (const notifyBackgroundRuns of [false, true]) {
+      values = { ...values, notifyBackgroundRuns };
+      const fake = fakePaseo(conversation(5), reply);
+      capture.remember(fake.paseo);
+      await capture.captureNow({ ...agent, id: `agent-${notifyBackgroundRuns}` });
+      await (await capture.startScan(REPO, cwd, "create")).done.catch(() => undefined);
+      await (await capture.startTidy(REPO, null)).done.catch(() => undefined);
+      expect(fake.created.map((worker) => worker.title)).toEqual(["memorise: capture", expect.stringContaining("memorise"), expect.stringContaining("memorise")]);
+      expect(fake.created.map((worker) => worker.background)).toEqual([!notifyBackgroundRuns, !notifyBackgroundRuns, !notifyBackgroundRuns]);
+    }
+  });
+
   it("refuses a scan at once when the daily limit is used up, without starting a worker", async () => {
     await writeFile(join(cwd, "README.md"), "Run make dev.\n");
     values = { ...values, captureMaxPerDay: 1 };
@@ -386,6 +402,21 @@ describe("capture", () => {
     expect(run).toHaveBeenCalledWith(agent);
   });
 
+  it("removes a leftover worker at start even though Paseo lists background agents only when asked", async () => {
+    const archived: string[] = [];
+    const leftover = { agent: { id: "worker-old", cwd: workersDir(root) } };
+    const paseo = {
+      agents: {
+        // As Paseo does: background agents are listed only with includeBackground.
+        list: async (options: { filter?: { includeBackground?: boolean } } = {}) => ({ entries: options.filter?.includeBackground ? [leftover] : [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }),
+        ref: (id: string) => ({ archive: async () => archived.push(id) }),
+      },
+      workspaces: { list: async () => ({ entries: [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }) },
+    } as unknown as PaseoApi;
+    capture.remember(paseo);
+    await vi.waitFor(() => expect(archived).toEqual(["worker-old"]));
+  });
+
   it("cancels a pending capture when a new turn starts", async () => {
     vi.useFakeTimers();
     const fake = fakePaseo(conversation(5), reply);
@@ -454,7 +485,8 @@ describe("capture", () => {
     // In the one hidden workspace on the worker folder; only the worker is archived afterwards.
     expect(fake.madeWorkspaces).toEqual([{ source: { kind: "directory", path: workersDir(root) }, background: true, title: WORKER_WORKSPACE_TITLE }]);
     expect(worker).toMatchObject({ cwd: workersDir(root), workspaceId: "hidden-1" });
-    expect(worker).not.toHaveProperty("background");
+    // A background agent: Paseo raises no "Agent finished" for it while notifications are off.
+    expect(worker.background).toBe(true);
     expect(fake.archived).toEqual(["worker-1"]);
     const pending = await proposals.list(REPO);
     expect(pending).toMatchObject([{ kind: "new", subject: "integration tests", paths: ["scripts/**"], source: { from: "capture", agentId: "agent-1", provider: "codex" } }]);
@@ -667,7 +699,7 @@ describe("hardening", () => {
       },
       providers: { listModels: async () => ({ models: [{ id: "m", isDefault: true }] }) },
     } as unknown as PaseoApi;
-    const run = runWorker(paseo, root, { provider: "claude", model: "", title: "t", prompt: "p", outputSchema: {}, timeoutMs: 10 * 60_000 }, () => undefined);
+    const run = runWorker(paseo, root, { provider: "claude", model: "", title: "t", prompt: "p", outputSchema: {}, timeoutMs: 10 * 60_000, notify: false }, () => undefined);
     const outcome = run.catch((error: Error) => error.message);
     await vi.waitFor(() => expect(polls).toBe(1));
     await vi.advanceTimersByTimeAsync(1_000);
