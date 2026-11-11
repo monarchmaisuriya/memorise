@@ -99,11 +99,16 @@ export class Capture {
   }
 
   private async sweepLeftoverWorkers(paseo: PaseoApi): Promise<void> {
-    // Workers are background agents, which Paseo lists only when asked.
-    const { entries } = await paseo.agents.list({ filter: { includeBackground: true } });
-    for (const { agent } of entries) {
-      if (isWorkerCwd(this.deps.root, agent.cwd) && !this.workerIds.has(agent.id)) await paseo.agents.ref(agent.id).archive();
-    }
+    // Workers sit in a background workspace and are background agents unless notifications are on;
+    // Paseo lists either only when asked. Every page is read: Paseo returns 200 agents per page.
+    let cursor: string | undefined;
+    do {
+      const { entries, pageInfo } = await paseo.agents.list({ filter: { includeBackground: true }, page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+      for (const { agent } of entries) {
+        if (isWorkerCwd(this.deps.root, agent.cwd) && !this.workerIds.has(agent.id)) await paseo.agents.ref(agent.id).archive();
+      }
+      cursor = pageInfo.hasMore && pageInfo.nextCursor ? pageInfo.nextCursor : undefined;
+    } while (cursor);
     const dir = workersDir(this.deps.root);
     for (const name of await readdir(dir).catch(() => [])) await rm(join(dir, name), { recursive: true, force: true });
   }
