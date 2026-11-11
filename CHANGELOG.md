@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-11-11
+
+### Fixed
+
+- A release to go back to from 0.11. 0.11.0 saves Memorise's settings as version 2, and Paseo refuses a settings file newer than the plugin, so 0.10.5 and earlier run on default settings after 0.11 (session suggestions off, your limits reset) until the file is edited. 0.10.6 reads version 2 files and keeps every value. Its memory-use line follows 0.11's "Show Memorise in agent chats" until you change "Show memory use in agent chats" here, and that switch is kept for the way back to 0.11. Nothing else changes from 0.10.5.
+
 ## [0.10.5] - 2026-11-03
 
 ### Changed
