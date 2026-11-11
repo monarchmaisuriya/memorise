@@ -54,6 +54,9 @@ export interface WorkerJob {
   prompt: string;
   outputSchema: Record<string, unknown>;
   timeoutMs: number;
+  // The "notifyBackgroundRuns" setting. Required, so a new caller must decide: Paseo raises "Agent
+  // finished" only for an agent that is not a background agent.
+  notify: boolean;
 }
 
 // The SDK needs "provider/model". A configured model is a model id as `paseo provider models <provider>`
@@ -106,6 +109,7 @@ export async function runWorker(paseo: PaseoApi, root: string, job: WorkerJob, o
       env: { [WORKER_ENV]: WORKER_ROLE },
       prompt: job.prompt,
       ...(job.provider === "opencode" ? {} : { outputSchema: job.outputSchema }),
+      background: !job.notify,
     });
     onCreated(handle.id);
     const deadline = Date.now() + job.timeoutMs;

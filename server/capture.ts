@@ -99,7 +99,8 @@ export class Capture {
   }
 
   private async sweepLeftoverWorkers(paseo: PaseoApi): Promise<void> {
-    const { entries } = await paseo.agents.list();
+    // Workers are background agents, which Paseo lists only when asked.
+    const { entries } = await paseo.agents.list({ filter: { includeBackground: true } });
     for (const { agent } of entries) {
       if (isWorkerCwd(this.deps.root, agent.cwd) && !this.workerIds.has(agent.id)) await paseo.agents.ref(agent.id).archive();
     }
@@ -289,7 +290,7 @@ export class Capture {
     const reply = await runWorker(
       paseo,
       this.deps.root,
-      { provider, model: values.tidyModel, title: `memorise: project ${mode}`, prompt: buildProjectPrompt({ repoKey, mode, files, existing: saved }), outputSchema: projectOutputSchema(mode), timeoutMs: WORKER_TIMEOUT_MS },
+      { provider, model: values.tidyModel, title: `memorise: project ${mode}`, prompt: buildProjectPrompt({ repoKey, mode, files, existing: saved }), outputSchema: projectOutputSchema(mode), timeoutMs: WORKER_TIMEOUT_MS, notify: values.notifyBackgroundRuns },
       (id) => this.trackWorker(id),
     );
     const byId = new Map(saved.map((fact) => [fact.id, fact]));
@@ -356,6 +357,7 @@ export class Capture {
           prompt: buildCapturePrompt({ repoKey, transcript: slice.text, existingSubjects: current.map((fact) => fact.subject).slice(0, 100), instructions: values.captureInstructions, exclusions: values.captureExclusions }),
           outputSchema: CAPTURE_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
           timeoutMs: WORKER_TIMEOUT_MS,
+          notify: values.notifyBackgroundRuns,
         },
         (id) => this.trackWorker(id),
       );
@@ -445,7 +447,7 @@ export class Capture {
     const reply = await runWorker(
       paseo,
       this.deps.root,
-      { provider, model: values.tidyModel, title: "memorise: tidy", prompt: buildTidyPrompt(repoKey, listed), outputSchema: TIDY_OUTPUT_SCHEMA as unknown as Record<string, unknown>, timeoutMs: WORKER_TIMEOUT_MS },
+      { provider, model: values.tidyModel, title: "memorise: tidy", prompt: buildTidyPrompt(repoKey, listed), outputSchema: TIDY_OUTPUT_SCHEMA as unknown as Record<string, unknown>, timeoutMs: WORKER_TIMEOUT_MS, notify: values.notifyBackgroundRuns },
       (id) => this.trackWorker(id),
     );
     const byId = new Map(facts.map((fact) => [fact.id, fact]));
