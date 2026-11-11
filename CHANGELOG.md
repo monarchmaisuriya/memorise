@@ -4,6 +4,12 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-11
+
+### Added
+
+- **"Notify when a background run finishes"** (Settings > Plugins > Memorise, off by default). Memorise's background runs (session suggestions, clean-ups, and project scans) each start a worker agent, and Paseo raised "Agent finished" for every one. Workers are now Paseo background agents, which Paseo never notifies about, unless this setting is on. Their suggestions still appear in the Suggestions tab. The settings version stays 2: going back to 0.11.0 or 0.10.6 keeps every setting.
+
 ## [0.11.0] - 2026-11-11
 
 ### Changed
