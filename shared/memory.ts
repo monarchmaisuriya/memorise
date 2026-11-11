@@ -431,6 +431,9 @@ function migrateMemorySettings(values: unknown, fromVersion: number): Record<str
 export const memorySettings = defineSettings({
   id: "memory",
   scope: "host",
+  // Raise the version only when a saved value must change meaning or be rewritten. A new key with a
+  // default needs no raise: files without it get the default. Paseo refuses a settings file newer than
+  // the plugin, so every raise makes all earlier releases run on default settings after this one.
   version: 2,
   migrate: migrateMemorySettings,
   schema: z.object({
