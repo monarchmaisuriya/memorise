@@ -107,11 +107,11 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(autoApproveReads) => save({ ...settings.values, autoApproveReads })}
           />
           <SettingsSwitch
-            label="Show memory use in agent chats"
-            hint="Adds one line to each agent's chat: how many memories it was given and how it used them. The model never sees it."
-            value={settings.values.showMemoryUse}
+            label="Show Memorise in agent chats"
+            hint="Adds rows to agents' chats: how many memories each agent was given and how it used them, and a card to review a session's suggestions. The model never sees them. Off: review suggestions in the Suggestions tab."
+            value={settings.values.showInAgentChats}
             disabled={settings.saving}
-            onValueChange={(showMemoryUse) => save({ ...settings.values, showMemoryUse })}
+            onValueChange={(showInAgentChats) => save({ ...settings.values, showInAgentChats })}
           />
         </SettingsCard>
       </SettingsSection>
