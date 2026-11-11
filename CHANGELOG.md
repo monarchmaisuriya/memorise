@@ -10,8 +10,14 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 - Memorise adds nothing to agents' chats unless you turn it on. One setting, "Show Memorise in agent chats" (Settings > Plugins > Memorise), now covers both rows it adds: the memory-use line ("Memorise · 29 memories in this agent's prompt · not used yet") and the "memories suggested" card after a session's suggestions are made. It is off by default and replaces "Show memory use in agent chats", which covered only the line.
 - Existing installs are switched off on upgrade, even where the old setting was on. Turn the new setting on to get both rows back. With it off, suggestions and memories saved without review are still made; review them in the Suggestions tab of the panel or Memorise.
-- The settings file moves to version 2. Going back to 0.10.5 afterwards makes Paseo reject it ("Settings were saved by a newer plugin version") and Memorise runs on default settings until `version` in `memory.json` is set back to 1.
+- The settings file moves to version 2. To go back to 0.10, install 0.10.6 (`paseo plugin update memorise --ref v0.10.6`), which reads version 2 files and keeps every value. 0.10.5 and earlier make Paseo reject the file ("Settings were saved by a newer plugin version") and run Memorise on default settings until `version` in `memory.json` is set back to 1.
 - The setting stops new rows; rows already in a chat stay where they are. Turning it on shows the line only for agents started after that. Turned off and on again, an agent's count catches up over its next turns, except for time when Paseo rebuilt the chat's history.
+
+## [0.10.6] - 2026-11-11
+
+### Fixed
+
+- A release to go back to from 0.11, on its own line after 0.10.5 (it is not part of 0.11). 0.11.0 saves Memorise's settings as version 2, and Paseo refuses a settings file newer than the plugin, so 0.10.5 and earlier run on default settings after 0.11 (session suggestions off, your limits reset) until the file is edited. 0.10.6 reads version 2 files and keeps every value. Its memory-use line follows 0.11's "Show Memorise in agent chats" until you change "Show memory use in agent chats" there, and that switch is kept for the way back to 0.11. Nothing else changes from 0.10.5.
 
 ## [0.10.5] - 2026-11-03
 
