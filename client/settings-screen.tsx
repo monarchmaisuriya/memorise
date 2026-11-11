@@ -115,7 +115,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
           />
           <SettingsSwitch
             label="Notify when a background run finishes"
-            hint="Paseo's “Agent finished” notification for Memorise's session suggestions, clean-ups, and project scans. Off: they finish quietly; their suggestions still appear in the Suggestions tab."
+            hint="Paseo's notifications when Memorise's session suggestions, clean-ups, and project scans finish or fail. Off: they end quietly; their suggestions appear in the Suggestions tab, and a failed run shows on its status in Memorise."
             value={settings.values.notifyBackgroundRuns}
             disabled={settings.saving}
             onValueChange={(notifyBackgroundRuns) => save({ ...settings.values, notifyBackgroundRuns })}

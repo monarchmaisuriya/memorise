@@ -417,6 +417,26 @@ describe("capture", () => {
     await vi.waitFor(() => expect(archived).toEqual(["worker-old"]));
   });
 
+  it("removes leftover workers on every page of Paseo's agent list", async () => {
+    const archived: string[] = [];
+    const pages: Record<string, { entries: { agent: { id: string; cwd: string } }[]; next: string | null }> = {
+      first: { entries: [{ agent: { id: "chat-1", cwd: "/tmp/elsewhere" } }], next: "page-2" },
+      "page-2": { entries: [{ agent: { id: "worker-late", cwd: workersDir(root) } }], next: null },
+    };
+    const paseo = {
+      agents: {
+        list: async (options: { page?: { cursor?: string } } = {}) => {
+          const page = pages[options.page?.cursor ?? "first"];
+          return { entries: page.entries, pageInfo: { hasMore: page.next !== null, nextCursor: page.next, prevCursor: null } };
+        },
+        ref: (id: string) => ({ archive: async () => archived.push(id) }),
+      },
+      workspaces: { list: async () => ({ entries: [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }) },
+    } as unknown as PaseoApi;
+    capture.remember(paseo);
+    await vi.waitFor(() => expect(archived).toEqual(["worker-late"]));
+  });
+
   it("cancels a pending capture when a new turn starts", async () => {
     vi.useFakeTimers();
     const fake = fakePaseo(conversation(5), reply);

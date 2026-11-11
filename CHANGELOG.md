@@ -4,6 +4,13 @@ All notable changes are recorded here. Versions follow [Semantic Versioning](htt
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-11
+
+### Fixed
+
+- Workers left behind by a plugin reload in the middle of a background run are removed again at the next start. Paseo 0.16 lists agents in background workspaces only when asked, and Memorise did not ask, so such workers were never removed; 0.12.0 asked, and 0.12.1 also reads every page of the list (Paseo returns 200 agents per page).
+- "Notify when a background run finishes" now says what it covers: with it off, a background run that fails raises no Paseo notification either. The failure still shows on the run's status in Memorise and in the plugin log.
+
 ## [0.12.0] - 2026-11-11
 
 ### Added
