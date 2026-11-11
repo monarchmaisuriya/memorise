@@ -72,8 +72,8 @@ Only agents created after the install get memory. Agents already running keep th
   - **Settings:** the same settings as Settings > Plugins > Memorise, without leaving Memorise.
 - **Work inside a workspace:** the Memorise workspace panel lists the project's memories and the global ones, with the same card and editor, and "Open in manager".
 - **See what agents see:** the panel's **What agents see** tab shows exactly what a new agent started in that workspace would see, why each memory is listed (pinned, about files this workspace changed, global, or this project), and how much prompt space (lines and KB) it uses.
-- **Review suggestions:** approve or reject them straight from the "memories suggested" card in the agent's chat, or edit them first in the Suggestions tab of the panel or Memorise. On desktop and in the browser, keys work there too: **j** and **k** (or the arrow keys) move between suggestions, **a** approves, and **r** rejects; keys typed into a field are left alone. In the cross-project Suggestions view, keys act on the open card while just one is open.
-- **See memory use in chats:** each agent's chat gets one quiet line, such as "Memorise · 12 memories in this agent's prompt · opened 2, searched 1", that updates as the agent uses the memory tools. The model never sees it. Turn it off with "Show memory use in agent chats" in Settings.
+- **Review suggestions:** approve or reject them in the Suggestions tab of the panel or Memorise, where you can also edit them first. On desktop and in the browser, keys work there too: **j** and **k** (or the arrow keys) move between suggestions, **a** approves, and **r** rejects; keys typed into a field are left alone. In the cross-project Suggestions view, keys act on the open card while just one is open. With "Show Memorise in agent chats" on, the agent's chat also gets a "memories suggested" card to approve or reject them from.
+- **See memory use in chats:** with "Show Memorise in agent chats" on (Settings, off by default), each agent's chat gets one quiet line, such as "Memorise · 12 memories in this agent's prompt · opened 2, searched 1", that updates as the agent uses the memory tools. The model never sees it.
 - **Let agents do it:** agents search and read memory on their own, and save what they learn with the write tools.
 
 ### Words Memorise uses
@@ -127,7 +127,7 @@ Settings > Plugins > Memorise, or **Settings** in Memorise. The main level holds
 | --- | --- | --- |
 | Give agents memory | on | Off keeps saved memories |
 | Read memories without asking | on | Saving or changing a memory still asks, unless the agent runs in a mode that skips approvals |
-| Show memory use in agent chats | on | A line when an agent starts (memories in its prompt), and one after each turn that used them, with the totals so far |
+| Show Memorise in agent chats | off | A line when an agent starts (memories in its prompt), one after each turn that used them, with the totals so far, and a card when a session's suggestions are ready. Off: review suggestions in the Suggestions tab |
 | Suggest memories from sessions | off | See below |
 | Provider that reads sessions | Same as the session | So no transcript leaves the provider that ran it |
 | Clean up each project weekly | off | Checked when the plugin starts and hourly after; clean-ups can also be started by hand |

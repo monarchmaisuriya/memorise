@@ -245,7 +245,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
       const prepared = await prepareMemory(config.cwd, values);
       if (prepared.off) return { ...request, config: stripped };
       const { repoKey, section } = prepared;
-      if (values.showMemoryUse) listedByFolder.set(resolve(config.cwd), { count: section.shownIds.length, at: Date.now() });
+      if (values.showInAgentChats) listedByFolder.set(resolve(config.cwd), { count: section.shownIds.length, at: Date.now() });
       await usage.record("shown", section.shownIds).catch((error: unknown) => console.error(`[memorise] usage log write failed: ${String(error)}`));
       const token = tokens.mint({ repoKey, cwd: config.cwd, provider });
       return {
@@ -303,7 +303,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
     capture.remember(paseo);
     const listed = listedByFolder.get(resolve(agent.cwd));
     if (!listed || Date.now() - listed.at > RECEIPT_MATCH_MS || capture.isWorker(agent.id, agent.cwd)) return;
-    if (!(await currentSettings()).showMemoryUse) return;
+    if (!(await currentSettings()).showInAgentChats) return;
     // Counting starts where the timeline ends now, so nothing before the agent existed is its use.
     const receipt = await timelineEnd(paseo, agent.id)
       .then((cursor) => receipts.start(agent.id, listed.count, cursor))
@@ -317,7 +317,7 @@ export function contributeMemory(server: PluginServerContext, resolveRoot: () =>
   server.on("agent.turn_ended", async ({ agent }, { paseo }) => {
     const { capture, receipts } = await runtime;
     await capture.onTurnEnded(agent, paseo);
-    if (capture.isWorker(agent.id, agent.cwd) || !(await currentSettings()).showMemoryUse) return;
+    if (capture.isWorker(agent.id, agent.cwd) || !(await currentSettings()).showInAgentChats) return;
     // Paseo's event carries no timeline, so the receipt reads the entries after the position it
     // counted up to. A rebuilt timeline moves the position without counting, so no call counts twice.
     const receipt = await (async () => {

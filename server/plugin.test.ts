@@ -457,7 +457,7 @@ describe("memorise server entry", () => {
   });
 
   it("shows each agent a receipt of the memories it was given, updated as it uses them", async () => {
-    const fake = start();
+    const fake = start({ ...defaults, showInAgentChats: true });
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
     const where = { repoKey: "github.com/acme/api" };
     for (const subject of ["one", "two"]) await fake.call("memory.save", { where, scope: "repo", type: "howto", subject, body: `${subject} body.` });
@@ -479,13 +479,26 @@ describe("memorise server entry", () => {
     expect(fake.appended[1].row.id).not.toBe(fake.appended[0].row.id);
   });
 
-  it("adds no receipt when the setting is off", async () => {
-    const fake = start({ ...defaults, showMemoryUse: false });
+  it("adds no receipt with the default settings", async () => {
+    const fake = start();
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
     await fake.create({ provider: "claude", cwd });
     await fake.agentCreated("agent-1", cwd);
     await fake.turnEnded("agent-1", cwd, [{ type: "tool_call", callId: "c1", name: "memory_read", detail: {}, status: "completed", error: null }]);
     expect(fake.appended).toEqual([]);
+  });
+
+  it("stops updating an agent's receipt once the setting is turned off", async () => {
+    let values: MemorySettings = { ...defaults, showInAgentChats: true };
+    const fake = fakeServer(defaults, async () => ({ status: "ready", revision: "1", values }));
+    cleanup = contributeMemory(fake.server, async () => root) as () => unknown;
+    const cwd = await repoWithOrigin("git@github.com:acme/api.git");
+    await fake.create({ provider: "claude", cwd });
+    await fake.agentCreated("agent-1", cwd);
+    expect(fake.appended).toHaveLength(1);
+    values = { ...values, showInAgentChats: false };
+    await fake.turnEnded("agent-1", cwd, [{ type: "tool_call", callId: "c1", name: "mcp__paseo-memorise__memory_read", detail: { type: "unknown" }, status: "completed", error: null }]);
+    expect(fake.appended).toHaveLength(1);
   });
 
   it("lists a folder memory meant for matching files once a matching file changed this week", async () => {

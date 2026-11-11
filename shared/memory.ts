@@ -419,10 +419,20 @@ export const tidyMemoryRpc = defineRpc({
   output: z.object({ started: z.literal(true) }),
 });
 
+// Version 2 replaced showMemoryUse (the receipt row only) with showInAgentChats (every row Memorise
+// adds to agent chats), off for everyone on upgrade.
+function migrateMemorySettings(values: unknown, fromVersion: number): Record<string, unknown> {
+  if (fromVersion !== 1) throw new Error(`Expected Memorise settings version 1 to migrate, got version ${fromVersion}`);
+  if (typeof values !== "object" || values === null) throw new Error(`Expected Memorise settings version 1 to be an object, got ${values === null ? "null" : typeof values}`);
+  const { showMemoryUse: _replaced, ...kept } = values as Record<string, unknown>;
+  return { ...kept, showInAgentChats: false };
+}
+
 export const memorySettings = defineSettings({
   id: "memory",
   scope: "host",
-  version: 1,
+  version: 2,
+  migrate: migrateMemorySettings,
   schema: z.object({
     enabled: z.boolean().default(true),
     autoApproveReads: z.boolean().default(true),
@@ -446,8 +456,9 @@ export const memorySettings = defineSettings({
     tidyProvider: providerSchema.default("claude"),
     tidyModel: z.string().trim().max(100).default(""),
     tidyWeekly: z.boolean().default(false),
-    // A row in each agent's chat saying how many memories it was given and how it used them.
-    showMemoryUse: z.boolean().default(true),
+    // Rows in agents' chats: how many memories each agent was given and how it used them, and a card
+    // when a session's suggestions are ready. Off until the user turns it on.
+    showInAgentChats: z.boolean().default(false),
     // Project scans started by the plugin for every project with an open workspace: never, once per
     // project, or once and then a re-check each week.
     projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),

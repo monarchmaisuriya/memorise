@@ -388,7 +388,8 @@ export class Capture {
         facts,
       );
       await this.saveCursor(agent.id, cursor);
-      if (added.pending + added.autoSaved > 0) {
+      // Settings are read again: the worker may have run for minutes, and the card follows the switch as it is now.
+      if (added.pending + added.autoSaved > 0 && (await this.deps.settings()).showInAgentChats) {
         // A card in the source agent's chat; the app renders it, the model never sees it. A new id per
         // card: Paseo refuses to fork from replies under a row that was replaced after them.
         await paseo.agents

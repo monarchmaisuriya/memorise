@@ -120,7 +120,7 @@ describe("capture", () => {
     root = tempDir("cap-root-");
     store = new MemoryStore(root);
     proposals = new ProposalStore(root);
-    values = { ...memorySettings.schema.parse({}), captureEnabled: true, captureIdleMinutes: 5 };
+    values = { ...memorySettings.schema.parse({}), captureEnabled: true, captureIdleMinutes: 5, showInAgentChats: true };
     repoPrefs = new RepoPrefs(root);
     keys = new ProjectKeys(root);
     capture = new Capture({ root, store, proposals, usage: new UsageLog(root), repoPrefs, keys, settings: async () => values });
@@ -314,6 +314,28 @@ describe("capture", () => {
     expect(await capture.captureNow(agent)).toBe(0);
     expect((await store.list(REPO)).map((fact) => fact.source.by)).toEqual(["auto"]);
     expect(fake.appended[0]).toMatchObject({ kind: "memorise-proposals", data: { count: 0, autoSaved: 1, ids: [] } });
+  });
+
+  it("with chat rows off, keeps the suggestions and moves on, but adds no chat card", async () => {
+    values = { ...values, showInAgentChats: false };
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(1);
+    expect(await proposals.list(REPO)).toMatchObject([{ kind: "new", subject: "integration tests" }]);
+    expect(fake.appended).toEqual([]);
+    // The same turns are not read again: the cursor moved past them.
+    expect(await capture.captureNow(agent)).toBe(0);
+    expect(fake.created).toHaveLength(1);
+  });
+
+  it("with chat rows off and auto mode on, saves captured memories without a chat card", async () => {
+    values = { ...values, showInAgentChats: false };
+    await repoPrefs.set(REPO, { enabled: true, includeGlobal: true, capture: "default", autoApprove: true });
+    const fake = fakePaseo(conversation(5), reply);
+    capture.remember(fake.paseo);
+    expect(await capture.captureNow(agent)).toBe(0);
+    expect((await store.list(REPO)).map((fact) => fact.source.by)).toEqual(["auto"]);
+    expect(fake.appended).toEqual([]);
   });
 
   it("with auto mode on, a memory that could not be saved stays a suggestion on the chat card", async () => {
