@@ -419,11 +419,27 @@ export const tidyMemoryRpc = defineRpc({
   output: z.object({ started: z.literal(true) }),
 });
 
+// Version 2 is how 0.11.0 and later save settings: one switch, showInAgentChats, for every row
+// Memorise adds to agent chats, in place of showMemoryUse. This release reads those files, so going
+// back from 0.11 keeps every value. Its memory-use line follows that switch until it saves a choice
+// of its own, and the switch is kept for the way back to 0.11. Version 1 files need no change.
+function migrateMemorySettings(values: unknown, fromVersion: number): unknown {
+  if (fromVersion !== 1) throw new Error(`Expected Memorise settings version 1 to migrate, got version ${fromVersion}`);
+  return values;
+}
+
+function followChatSwitch(values: unknown): unknown {
+  if (typeof values !== "object" || values === null || "showMemoryUse" in values) return values;
+  const { showInAgentChats } = values as { showInAgentChats?: unknown };
+  return typeof showInAgentChats === "boolean" ? { ...values, showMemoryUse: showInAgentChats } : values;
+}
+
 export const memorySettings = defineSettings({
   id: "memory",
   scope: "host",
-  version: 1,
-  schema: z.object({
+  version: 2,
+  migrate: migrateMemorySettings,
+  schema: z.preprocess(followChatSwitch, z.object({
     enabled: z.boolean().default(true),
     autoApproveReads: z.boolean().default(true),
     indexMaxLines: z.number().int().min(0).max(400).default(150),
@@ -448,9 +464,11 @@ export const memorySettings = defineSettings({
     tidyWeekly: z.boolean().default(false),
     // A row in each agent's chat saying how many memories it was given and how it used them.
     showMemoryUse: z.boolean().default(true),
+    // The 0.11 switch for every chat row; unused here, kept so it survives a save.
+    showInAgentChats: z.boolean().default(false),
     // Project scans started by the plugin for every project with an open workspace: never, once per
     // project, or once and then a re-check each week.
     projectAutoScan: z.enum(["off", "once", "weekly"]).default("off"),
-  }),
+  })),
 });
 export type MemorySettings = z.infer<typeof memorySettings.schema>;
