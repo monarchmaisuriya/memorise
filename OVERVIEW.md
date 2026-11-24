@@ -1,4 +1,4 @@
-Memorise gives Claude, Codex, and OpenCode agents one shared memory. A fact learned by one agent in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
+Memorise gives Claude, Codex, OpenCode, and Antigravity agents one shared memory. A fact learned by one agent in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
 
 ## How it works
 
@@ -20,6 +20,7 @@ The background agents read text that may contain instructions planted in a sessi
 - Claude: every built-in tool and Paseo's own tools are disallowed, and your own MCP servers are not loaded.
 - OpenCode: a single rule denies every tool, Paseo's included.
 - Codex cannot switch off its shell. Its workers run in a read-only sandbox without network or web search, and anything beyond reading must ask, which the plugin denies. A misled Codex worker could still read files and put what it read into a proposal, which you see before approving.
+- Antigravity is not used as a background worker because its ACP adapter currently exposes no tool-blocking or sandbox option. To get suggestions from Antigravity sessions, choose a fixed provider (Claude, Codex, or OpenCode) under "Provider that reads sessions".
 
 Workers are archived when they finish, and leftovers from an interrupted run are removed when the plugin next starts.
 
@@ -53,4 +54,4 @@ Workers are archived when they finish, and leftovers from an interrupted run are
 - Search matches words, not meaning. If the search index cannot be opened, keyword search is off and search by files still works.
 - Paseo does not replay events, so sessions that end while the plugin is stopped get no suggestions. A suggestion run that fails is retried at the next quiet spell, within the daily limit.
 - With OpenCode, the notes always reach the agent, but some models follow Code Mode's instruction to use only `execute` and skip the memory tools, which Paseo connects as ordinary tools. Asking the agent to list its tools, or using a model that calls ordinary tools, works around it.
-- Tested with Paseo 0.12.0 on macOS, with Claude, Codex, and OpenCode. Requires git on the daemon host (folders outside git work too).
+- Tested with Paseo 0.12.0 through 0.17.4 on macOS, with Claude, Codex, OpenCode, and Antigravity (requires Paseo 0.16.2 or later and Antigravity CLI 1.5 or later for system-prompt memory injection). Requires git on the daemon host (folders outside git work too).

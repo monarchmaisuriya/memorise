@@ -10,7 +10,7 @@ import type { PaseoApi } from "./paseo-types";
 import { type ProjectFile, readProjectFiles } from "./project-files";
 import type { ProjectKeys } from "./project-keys";
 import type { NewProposal, ProposalStore } from "./proposals";
-import { type Provider, supportedProvider } from "./providers";
+import { supportedProvider, type WorkerProvider, workerProvider } from "./providers";
 import type { RepoPrefs } from "./repo-prefs";
 import type { MemoryStore } from "./store";
 import { readTimelineSince } from "./timeline";
@@ -181,6 +181,9 @@ export class Capture {
     this.remember(paseo);
     if (this.isWorker(agent.id, agent.cwd) || !supportedProvider(agent.provider)) return;
     const values = await this.deps.settings();
+    // "session" keeps transcripts with their own provider, so a session whose provider cannot run
+    // locked-down workers is skipped rather than silently sent to another provider.
+    if (values.captureProvider === "session" && !workerProvider(agent.provider)) return;
     const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
     if (!repoKey || !(await this.captureOn(values, repoKey))) return;
     clearTimeout(this.timers.get(agent.id));
@@ -293,7 +296,7 @@ export class Capture {
   private async runScan(paseo: PaseoApi, repoKey: string, mode: ScanMode, files: ProjectFile[], values: MemorySettings): Promise<{ pending: number; autoSaved: number }> {
     const facts = await this.deps.store.list(repoKey);
     const saved = facts.filter((fact) => fact.scope === "repo" && fact.status === "active" && !fact.superseded).slice(0, 200);
-    const provider: Provider = values.tidyProvider;
+    const provider: WorkerProvider = values.tidyProvider;
     const types = allowedTypes(values.customTypes);
     const reply = await runWorker(
       paseo,
@@ -338,10 +341,15 @@ export class Capture {
     this.running.add(agent.id);
     try {
       const values = await this.deps.settings();
-      const provider = values.captureProvider === "session" ? supportedProvider(agent.provider) : values.captureProvider;
+      const provider = values.captureProvider === "session" ? workerProvider(agent.provider) : values.captureProvider;
       // A model id belongs to one provider, so it applies only when one provider reads every session.
       const model = values.captureProvider === "session" ? "" : values.captureModel;
-      if (!provider) return 0;
+      if (!provider) {
+        if (values.captureProvider === "session" && supportedProvider(agent.provider)) {
+          console.log(`[memorise] capture for ${agent.provider} agent ${agent.id} skipped: choose a fixed "Provider that reads sessions" in Settings`);
+        }
+        return 0;
+      }
       const repoKey = await this.deps.keys.keyOf(agent.cwd).catch(() => null);
       // Captured memories belong to a repo; global memories come only from the user.
       if (!repoKey || !(await this.captureOn(values, repoKey))) return 0;
@@ -458,7 +466,7 @@ export class Capture {
       const usage = usageOf(counts, fact.id);
       return { fact, note: notes.get(fact.id), shown: usage.shown, readOrFound: usage.read + usage.found };
     });
-    const provider: Provider = values.tidyProvider;
+    const provider: WorkerProvider = values.tidyProvider;
     const reply = await runWorker(
       paseo,
       this.deps.root,

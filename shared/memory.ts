@@ -20,7 +20,8 @@ export const subjectSchema = z
   .trim()
   .min(1)
   .max(MAX_SUBJECT_CHARS)
-  .regex(/^[^\u0000-\u001f\u007f]+$/, "A memory subject is one line of text, without line breaks or control characters")
+  // Hex escapes instead of \uXXXX so RE2-based JSON Schema validators (e.g. Antigravity) accept the pattern.
+  .regex(/^[^\x00-\x1f\x7f]+$/, "A memory subject is one line of text, without line breaks or control characters")
   .refine(noMemoryTag, TAG_MESSAGE);
 
 export const bodySchema = z.string().trim().min(1).max(MAX_BODY_CHARS).refine(noMemoryTag, TAG_MESSAGE);
@@ -354,8 +355,13 @@ export const previewMemoryRpc = defineRpc({
 // A proposal is a change to memory that waits for the user: a new fact from a captured session, or a
 // merge, replacement, or retirement suggested by a tidy pass. Agents never see proposals.
 export const proposalKindSchema = z.enum(["new", "replace", "merge", "retire"]);
-export const PROVIDERS = ["claude", "codex", "opencode"] as const;
+// Providers whose Paseo adapters pass both systemPrompt and HTTP MCP servers through (checked live).
+export const PROVIDERS = ["claude", "codex", "opencode", "antigravity"] as const;
 export const providerSchema = z.enum(PROVIDERS);
+// Providers whose tools can be locked down for untrusted background workers (capture, tidy, project scans).
+// Antigravity ACP currently exposes no tool-blocking or sandbox option and does not support output_schema.
+export const WORKER_PROVIDERS = ["claude", "codex", "opencode"] as const;
+export const workerProviderSchema = z.enum(WORKER_PROVIDERS);
 
 export const proposalSchema = z.object({
   id: factIdSchema,
@@ -490,7 +496,7 @@ export const memorySettings = defineSettings({
     // Capture: propose memories from finished sessions. Off until the user turns it on.
     captureEnabled: z.boolean().default(false),
     // "session" reads each session with the provider that ran it, so no transcript crosses providers.
-    captureProvider: z.enum(["session", ...PROVIDERS]).default("session"),
+    captureProvider: z.enum(["session", ...WORKER_PROVIDERS]).default("session"),
     captureModel: z.string().trim().max(100).default(""),
     captureIdleMinutes: z.number().int().min(5).max(240).default(20),
     captureMinUserMessages: z.number().int().min(1).max(50).default(3),
@@ -499,7 +505,7 @@ export const memorySettings = defineSettings({
     captureExclusions: z.string().max(2_000).default(""),
     // Tidy: propose merges, replacements, and retirements. Facts it reads already go to every
     // provider in prompts, so it adds no new data flow.
-    tidyProvider: providerSchema.default("claude"),
+    tidyProvider: workerProviderSchema.default("claude"),
     tidyModel: z.string().trim().max(100).default(""),
     tidyWeekly: z.boolean().default(false),
     // Rows in agents' chats: how many memories each agent was given and how it used them, and a card

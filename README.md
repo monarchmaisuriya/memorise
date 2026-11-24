@@ -2,7 +2,7 @@
 
 # memorise
 
-Memorise for [Paseo](https://paseo.sh): one shared memory for Claude, Codex, and OpenCode agents.
+Memorise for [Paseo](https://paseo.sh): one shared memory for Claude, Codex, OpenCode, and Antigravity agents.
 
 A fact one agent learns in one workspace reaches every later agent in any workspace of the same repository, whichever provider runs it. Your own preferences, saved as global memories, reach agents in every repository.
 
@@ -22,7 +22,7 @@ The plugin's id in Paseo is `memorise`.
 
 - Paseo 0.12.0 or later (tested with 0.12.0 and 0.14.0 on macOS).
 - git and npm on the daemon host.
-- At least one of the Claude, Codex, or OpenCode providers set up in Paseo.
+- At least one of the Claude, Codex, OpenCode, or Antigravity providers set up in Paseo (Antigravity system-prompt memory injection requires Paseo 0.16.2+ and `agy` 1.5+; session suggestions and clean-ups require Claude, Codex, or OpenCode).
 
 ## Install
 
@@ -206,6 +206,7 @@ The background agents read text that may contain instructions planted in a sessi
 - **Claude:** every built-in tool and Paseo's own tools are disallowed, and your own MCP servers are not loaded.
 - **OpenCode:** one rule denies every tool. OpenCode's free models refuse background agents, so capture there needs a paid model.
 - **Codex:** cannot switch off its shell. Its workers run in a read-only sandbox with no network and no web search. A misled Codex worker could still read files and put what it read into a proposal, which you see before approving.
+- **Antigravity:** not used as a background worker because its ACP adapter exposes no tool-blocking or sandbox option. Antigravity sessions can still be captured by selecting Claude, Codex, or OpenCode under "Provider that reads sessions".
 
 Workers run in the plugin's empty worker folder, inside one hidden Paseo workspace ("Memorise background work") that is made once and kept, and each worker is archived when it finishes. Paseo shows a project in the sidebar once its last workspace is archived, so the hidden workspace is never archived; if you archive it, the next worker makes it again.
 
@@ -227,7 +228,7 @@ Paseo plugins cannot call each other, so Memorise publishes a heartbeat and each
 - Search matches words, not meaning. If the search index cannot be opened, keyword search is off and search by files still works.
 - Sessions that end while the plugin is stopped are not captured; Paseo does not replay events.
 - With OpenCode, the notes always reach the agent, but some models follow Code Mode's instruction to use only `execute` and skip the memory tools ([getpaseo/paseo#7772](https://github.com/getpaseo/paseo/issues/7772)).
-- OpenCode agents can save memories without asking, even in plan mode; that is OpenCode's own permission behavior.
+- OpenCode and Antigravity agents can save memories without asking under their own tool permission policies.
 
 ## Development
 

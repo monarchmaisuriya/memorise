@@ -113,11 +113,13 @@ describe("memorise server entry", () => {
     const fake = start();
     const cwd = await repoWithOrigin("git@github.com:acme/api.git");
     await fake.call("memory.save", { where: { directory: cwd }, scope: "global", type: "preference", subject: "commits", body: "Ask before running git commit." });
-    const { config } = await fake.create({ provider: "claude", cwd, systemPrompt: "Be brief.", mcpServers: other });
-    expect(config.systemPrompt).toMatch(/^Be brief\.\n\n<memorise>/);
-    expect(config.systemPrompt).toContain("preference (global): commits: Ask before running git commit.");
-    expect(Object.keys(config.mcpServers).sort()).toEqual(["excalidraw", "paseo-memorise", "paseo-memorise-write"]);
-    expect(config.mcpServers["paseo-memorise"].headers.Authorization).toMatch(/^Bearer /);
+    for (const provider of ["claude", "antigravity"] as const) {
+      const { config } = await fake.create({ provider, cwd, systemPrompt: "Be brief.", mcpServers: other });
+      expect(config.systemPrompt).toMatch(/^Be brief\.\n\n<memorise>/);
+      expect(config.systemPrompt).toContain("preference (global): commits: Ask before running git commit.");
+      expect(Object.keys(config.mcpServers).sort()).toEqual(["excalidraw", "paseo-memorise", "paseo-memorise-write"]);
+      expect(config.mcpServers["paseo-memorise"].headers.Authorization).toMatch(/^Bearer /);
+    }
   });
 
   it("re-scopes a child agent instead of keeping its parent's section and token", async () => {
@@ -146,12 +148,16 @@ describe("memorise server entry", () => {
     cleanup = () => undefined;
   });
 
-  it("approves reads for Claude and Codex but never writes", async () => {
+  it("approves reads for Claude, Codex, and Antigravity but never writes", async () => {
     const fake = start();
     await fake.permission({ id: "r1", name: "mcp__paseo-memorise__memory_search" });
     await fake.permission({ id: "r2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-memorise" } });
+    await fake.permission({ id: "r4", name: "mcp_paseo-memorise_memory_search" }, "/tmp", "antigravity");
+    await fake.permission({ id: "r5", name: "paseo-memorise.memory_read" }, "/tmp", "antigravity");
     await fake.permission({ id: "w1", name: "mcp__paseo-memorise-write__memory_write" });
     await fake.permission({ id: "w2", name: "CodexMcpElicitation", metadata: { serverName: "paseo-memorise-write" } });
+    await fake.permission({ id: "w3", name: "mcp_paseo-memorise-write_memory_write" }, "/tmp", "antigravity");
+    await fake.permission({ id: "w4", name: "paseo-memorise-write.memory_write" }, "/tmp", "antigravity");
     // A user's own server that happens to use the old, generic name is never approved.
     await fake.permission({ id: "u1", name: "mcp__memorise__delete_everything" });
     await fake.permission({ id: "u2", name: "CodexMcpElicitation", metadata: { serverName: "memorise" } });
@@ -159,7 +165,8 @@ describe("memorise server entry", () => {
     await fake.permission({ id: "r3", name: "mcp__paseo-memorise__memory_read" });
     await fake.permission({ id: "f1", name: "mcp__paseo-memorise__delete_everything" });
     await fake.permission({ id: "f2", name: "mcp__paseo-memorise__memory_read_all" });
-    expect(fake.respondToPermission.mock.calls.map(([call]) => call.requestId)).toEqual(["r1", "r2", "r3"]);
+    await fake.permission({ id: "f3", name: "mcp_paseo-memorise_delete_everything" }, "/tmp", "antigravity");
+    expect(fake.respondToPermission.mock.calls.map(([call]) => call.requestId)).toEqual(["r1", "r2", "r4", "r5", "r3"]);
   });
 
   it("approves no read where Memorise gives agents no tools: memory off, the project off, or another provider", async () => {

@@ -55,7 +55,14 @@ describe("dates and counts", () => {
 
 describe("providers", () => {
   it("writes provider ids as people write them", () => {
-    expect([providerName("claude"), providerName("codex"), providerName("opencode"), providerName("other"), providerName(null)]).toEqual(["Claude", "Codex", "OpenCode", "other", "an agent"]);
+    expect([providerName("claude"), providerName("codex"), providerName("opencode"), providerName("antigravity"), providerName("other"), providerName(null)]).toEqual([
+      "Claude",
+      "Codex",
+      "OpenCode",
+      "Antigravity",
+      "other",
+      "an agent",
+    ]);
     expect([pluginName("contextualise"), pluginName("my-plugin")]).toEqual(["Contextualise", "My Plugin"]);
   });
 });

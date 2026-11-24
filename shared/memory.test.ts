@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { allowedTypes, BUILTIN_TYPES, MAX_CUSTOM_TYPES, memorySettings, memoryTypeSchema, typeProblem, proposalsCardSchema } from "./memory";
+import { z } from "zod";
+import { allowedTypes, BUILTIN_TYPES, MAX_CUSTOM_TYPES, memorySettings, memoryTypeSchema, PROVIDERS, subjectSchema, typeProblem, proposalsCardSchema, WORKER_PROVIDERS } from "./memory";
 
 // The migration Paseo calls, so a test fails if it is ever left out of the definition.
 const migrate = (values: unknown, fromVersion: number) => {
@@ -64,6 +65,23 @@ describe("memory settings", () => {
 
   it("refuses settings from a version it does not know", () => {
     expect(() => migrate({}, 7)).toThrow("Expected Memorise settings version 1 to migrate, got version 7");
+  });
+
+  it("includes Antigravity for agent memory while keeping background workers on locked-down providers", () => {
+    expect(PROVIDERS).toContain("antigravity");
+    expect(WORKER_PROVIDERS).not.toContain("antigravity");
+    expect(memorySettings.schema.safeParse({ captureProvider: "antigravity" }).success).toBe(false);
+    expect(memorySettings.schema.safeParse({ tidyProvider: "antigravity" }).success).toBe(false);
+  });
+
+  it("keeps subjectSchema's JSON Schema pattern RE2-compatible (no \\u escapes)", () => {
+    const jsonSchema = z.toJSONSchema(subjectSchema) as { pattern?: string };
+    expect(jsonSchema.pattern).toBeDefined();
+    expect(jsonSchema.pattern).not.toContain("\\u");
+    expect(subjectSchema.safeParse("valid subject").success).toBe(true);
+    expect(subjectSchema.safeParse("line1\nline2").success).toBe(false);
+    expect(subjectSchema.safeParse("null\x00byte").success).toBe(false);
+    expect(subjectSchema.safeParse("del\x7fchar").success).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "id": "memorise",
   "name": "Memorise",
-  "description": "Durable facts shared by Claude, Codex, and OpenCode agents across workspaces.",
+  "description": "Durable facts shared by Claude, Codex, OpenCode, and Antigravity agents across workspaces.",
   "icon": "assets/icon.png",
   "requirements": {
     "paseo": ">=0.12.0"

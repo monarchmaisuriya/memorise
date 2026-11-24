@@ -67,8 +67,16 @@ import { Interop } from "./interop";
 const CITATION_BUDGET_MS = 1_000;
 const PATH_MATCH_BUDGET_MS = 500;
 const BY_USER = { by: "user" as const, provider: null, branch: null, commit: null };
-// The permission requests Claude sends for the two tools of the read server (see buildReadServer).
-const READ_TOOL_REQUESTS = new Set(["memory_search", "memory_read"].map((tool) => `mcp__${READ_SERVER}__${tool}`));
+// The permission requests providers send for the two tools of the read server (see buildReadServer):
+// Claude uses mcp__<server>__<tool>; Antigravity ACP uses mcp_<server>_<tool> (or <server>.<tool>).
+const READ_TOOLS = ["memory_search", "memory_read"] as const;
+const READ_TOOL_REQUESTS = new Set(
+  READ_TOOLS.flatMap((tool) => [
+    `mcp__${READ_SERVER}__${tool}`,
+    `mcp_${READ_SERVER}_${tool}`,
+    `${READ_SERVER}.${tool}`,
+  ]),
+);
 
 interface Runtime {
   root: string;

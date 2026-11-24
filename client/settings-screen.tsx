@@ -2,7 +2,7 @@ import { type PluginSurfaceProps, useSettings } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsCard, SettingsInput, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
 import { Text } from "react-native";
-import { type MemorySettings, memorySettings, PROVIDERS } from "../shared/memory";
+import { type MemorySettings, memorySettings, WORKER_PROVIDERS } from "../shared/memory";
 import { errorText } from "./copy";
 
 type NumberKey = "memoryMaxChars" | "indexMaxLines" | "expiryDays" | "mcpPort" | "captureIdleMinutes" | "captureMinUserMessages" | "captureMaxPerDay";
@@ -37,12 +37,12 @@ const ADVANCED_TEXTS: ReadonlyArray<{ key: TextKey; label: string; hint: string 
   { key: "tidyModel", label: "Clean-up and project files model", hint: "Empty uses the provider's default model." },
 ];
 
-const PROVIDER_LABEL: Record<(typeof PROVIDERS)[number], string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode" };
+const PROVIDER_LABEL: Record<(typeof WORKER_PROVIDERS)[number], string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode" };
 const CAPTURE_PROVIDER_OPTIONS = [
   { label: "Same as the session (transcripts stay with their provider)", value: "session" },
-  ...PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider })),
+  ...WORKER_PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider })),
 ] as const;
-const TIDY_PROVIDER_OPTIONS = PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider }));
+const TIDY_PROVIDER_OPTIONS = WORKER_PROVIDERS.map((provider) => ({ label: PROVIDER_LABEL[provider], value: provider }));
 const PROJECT_AUTO_SCAN_OPTIONS = [
   { label: "Off", value: "off" as const },
   { label: "Once per project", value: "once" as const },
@@ -102,7 +102,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
         <SettingsCard>
           <SettingsSwitch
             label="Give agents memory"
-            hint="New Claude, Codex, and OpenCode agents get your memories and the memory tools. Off keeps saved memories."
+            hint="New Claude, Codex, OpenCode, and Antigravity agents get your memories and the memory tools. Off keeps saved memories."
             value={settings.values.enabled}
             disabled={settings.saving}
             onValueChange={(enabled) => save({ ...settings.values, enabled })}
@@ -148,7 +148,7 @@ export function MemorySettingsScreen({ theme }: PluginSurfaceProps) {
           />
           <SettingsSelect
             label="Provider that reads sessions"
-            hint="Secret-shaped text is removed before the session is sent."
+            hint="Secret-shaped text is removed before the session is sent. Choose a fixed provider to get suggestions from Antigravity sessions."
             value={settings.values.captureProvider}
             options={CAPTURE_PROVIDER_OPTIONS}
             disabled={settings.saving}

@@ -52,9 +52,9 @@ export function shortDate(day: string, now = new Date()): string {
   return dayAndMonth(new Date(year, month - 1, date), now);
 }
 
-const PROVIDER_NAME: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode" };
+const PROVIDER_NAME: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", antigravity: "Antigravity" };
 
-// A provider id as people write it: "Claude", "Codex", "OpenCode"; an unknown one as given.
+// A provider id as people write it: "Claude", "Codex", "OpenCode", "Antigravity"; an unknown one as given.
 export function providerName(provider: string | null): string {
   return provider ? (PROVIDER_NAME[provider] ?? provider) : "an agent";
 }

@@ -1,16 +1,19 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { PaseoApi } from "./paseo-types";
-import type { Provider } from "./providers";
+import type { WorkerProvider } from "./providers";
 
 // Background "worker" agents run the capture and tidy passes. They read untrusted text, so each one
 // runs with its provider's tools switched off through provider options, in a restricted mode, in the
 // plugin's empty worker folder, and the plugin denies every permission request a worker raises.
 // Workers never get memory themselves, and their own turns are never captured.
+// Antigravity is excluded from WorkerProvider (checked live): its ACP adapter exposes no tool-blocking
+// or sandbox option (shell, file reads/writes, and Paseo MCP tools ran in plan/default mode without
+// asking permission) and does not support prompt.output_schema.
 export const WORKER_ENV = "MEMORISE_ROLE";
 export const WORKER_ROLE = "worker";
 
-const RESTRICTED_MODES: Record<Provider, string> = { claude: "plan", codex: "auto", opencode: "plan" };
+const RESTRICTED_MODES: Record<WorkerProvider, string> = { claude: "plan", codex: "auto", opencode: "plan" };
 
 // Mode alone is not enough (checked live): in their restricted modes all three providers ran shell
 // commands without asking, and OpenCode ran Paseo's own tools (which Paseo adds after plugin hooks).
@@ -24,14 +27,14 @@ export const CLAUDE_BLOCKED_TOOLS = [
   "Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS",
   "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "Skill", "SlashCommand", "mcp__paseo",
 ];
-export const LOCKDOWN_OPTIONS: Record<Provider, Record<string, unknown>> = {
+export const LOCKDOWN_OPTIONS: Record<WorkerProvider, Record<string, unknown>> = {
   claude: { disallowedTools: CLAUDE_BLOCKED_TOOLS, settings: { permissions: { deny: CLAUDE_BLOCKED_TOOLS } }, extraArgs: { "strict-mcp-config": null } },
   codex: { sandbox_mode: "read-only", web_search: "disabled" },
   opencode: { permission: "deny" },
 };
 // A worker reads only its prompt. Claude would also load the user's CLAUDE.md files into every worker
 // session, which on a large personal CLAUDE.md costs more than the transcript the worker reads.
-const LOCKDOWN_ENV: Record<Provider, Record<string, string>> = { claude: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" }, codex: {}, opencode: {} };
+const LOCKDOWN_ENV: Record<WorkerProvider, Record<string, string>> = { claude: { CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1" }, codex: {}, opencode: {} };
 const POLL_MS = 15_000;
 const PERMISSION_BACKOFF_MS = 2_000;
 const MAX_PERMISSION_WAITS = 10;
@@ -51,7 +54,7 @@ export function isWorkerRequest(root: string, cwd: string, env: Record<string, s
 }
 
 export interface WorkerJob {
-  provider: Provider;
+  provider: WorkerProvider;
   model: string;
   title: string;
   prompt: string;
@@ -64,7 +67,7 @@ export interface WorkerJob {
 
 // The SDK needs "provider/model". A configured model is a model id as `paseo provider models <provider>`
 // lists it (OpenCode ids themselves contain a slash); with none, the provider's default model is used.
-export async function resolveModel(paseo: PaseoApi, provider: Provider, model: string): Promise<string> {
+export async function resolveModel(paseo: PaseoApi, provider: WorkerProvider, model: string): Promise<string> {
   if (model) return `${provider}/${model}`;
   const { models } = await paseo.providers.listModels(provider);
   const chosen = models?.find((candidate) => candidate.isDefault) ?? models?.[0];

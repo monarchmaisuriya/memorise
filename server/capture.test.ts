@@ -683,6 +683,24 @@ describe("capture", () => {
     expect(fake.created[0].outputSchema).toBeUndefined();
   });
 
+  it("captures Antigravity sessions with a fixed worker provider, and skips them when set to session", async () => {
+    const agyAgent = { ...agent, id: "agent-agy", provider: "antigravity" };
+    values = { ...values, captureProvider: "session" };
+    const skipped = fakePaseo(conversation(5), reply);
+    capture.remember(skipped.paseo);
+    expect(await capture.captureNow(agyAgent)).toBe(0);
+    expect(skipped.created).toHaveLength(0);
+
+    values = { ...values, captureProvider: "codex" };
+    const captured = fakePaseo(conversation(5), reply);
+    capture.remember(captured.paseo);
+    expect(await capture.captureNow(agyAgent)).toBe(1);
+    expect(captured.created).toHaveLength(1);
+    expect(captured.created[0].config).toMatchObject({ provider: "codex/codex-default", modeId: "auto" });
+    const pending = await proposals.list(REPO);
+    expect(pending).toMatchObject([{ kind: "new", subject: "integration tests", source: { from: "capture", agentId: "agent-agy", provider: "codex" } }]);
+  });
+
   it("captures a session in a folder outside git into that folder's own memory", async () => {
     const plain = tempDir("plain-");
     const fake = fakePaseo(conversation(5), reply);

@@ -14,6 +14,7 @@ describe("memory tool use in a turn", () => {
     const items = [
       call("mcp__paseo-memorise__memory_read"),
       call("paseo-memorise.memory_read"),
+      call("mcp_paseo-memorise_memory_search"),
       call("memory_search"),
       call("mcp__paseo-memorise-write__memory_write"),
       call("paseo-memorise-write.memory_update"),
@@ -24,7 +25,7 @@ describe("memory tool use in a turn", () => {
       call("mcp__paseo-memorise__memory_read", { type: "unknown" }, "failed"),
       { type: "assistant_message", text: "I used memory_read" } as unknown as AgentTimelineItem,
     ];
-    expect(memoryToolUse(items)).toEqual({ opened: 3, searched: 1, saved: 2, archived: 1, other: 1 });
+    expect(memoryToolUse(items)).toEqual({ opened: 3, searched: 2, saved: 2, archived: 1, other: 1 });
   });
 });
 
